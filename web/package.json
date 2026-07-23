@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "pages:build": "next build",
+    "pages:deploy": "wrangler pages deploy",
+    "pages:preview": "wrangler pages dev dist"
   },
   "dependencies": {
     "@emotion/cache": "11.14.0",
@@ -33,7 +36,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
     "tailwindcss": "^4",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "wrangler": "^4"
   },
   "ignoreScripts": [
     "sharp",
