@@ -1,0 +1,35 @@
+import Card from "@mui/material/Card";
+import Typography from "@mui/material/Typography";
+
+import type { TrendKeyword } from "@/types/domain";
+
+export interface TrendCardProps {
+  trend: TrendKeyword;
+  index: number;
+  animate: boolean;
+}
+
+
+export function TrendCard({ trend, index, animate }: TrendCardProps) {
+  const rank = String(trend.rank).padStart(2, "0");
+  const negative = trend.growthRate < 0;
+  const slope = `${negative ? "▼" : "▲"} ${negative ? "" : "+"}${trend.growthRate.toFixed(2)}`;
+
+  return (
+    <Card
+      className={animate ? "card-in" : undefined}
+      style={animate ? { animationDelay: `${index * 30}ms` } : undefined}
+    >
+      <div className="flex flex-col gap-2 p-5">
+        <span className="font-mono text-[13px] text-ink-3">{rank}</span>
+        <Typography variant="h6" component="h3" className="line-clamp-2">
+          {trend.keyword}
+        </Typography>
+        <div className="font-mono text-sm text-ink">
+          {slope}
+          <span className="text-ink-2"> · {trend.count} works</span>
+        </div>
+      </div>
+    </Card>
+  );
+}
