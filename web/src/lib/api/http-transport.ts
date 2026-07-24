@@ -6,6 +6,8 @@ import type {
   HarvestInitResponse,
   HealthStatus,
   JobRegisterRequest,
+  ProjectActionRequest,
+  ProjectActionResponse,
   SchedulerProfile,
   TrendKeyword,
 } from "@/types/domain";
@@ -69,6 +71,8 @@ export function createHttpTransport(): ApiTransport {
     },
     registerJob: (req: JobRegisterRequest) =>
       postJson<SchedulerProfile>("/api/v1/jobs/register", req),
+    applyProjectAction: ({ projectId, action }: ProjectActionRequest) =>
+      postJson<ProjectActionResponse>(`/api/v1/projects/${encodeURIComponent(projectId)}/action`, { action }),
     getGraphSnapshot: (kind) => getJson<GraphSnapshot>(`/api/v1/graph/snapshot?kind=${kind}`),
     getWikiRaw: async (docId: string) => {
       const res = await request(`/api/v1/wiki/raw/${encodeURIComponent(docId)}`);
@@ -77,7 +81,7 @@ export function createHttpTransport(): ApiTransport {
     recalculateTrends: ([start, end]: [number, number]) =>
       getJson<TrendKeyword[]>(`/api/v1/trends/recalculate?start=${start}&end=${end}`),
     getGapPositions: () => getJson<GapPositionsResponse>("/api/v1/gaps/positions"),
-    openCrawlSocket: (taskId, onEvent, onStatus) =>
+    openCrawlSocket: (taskId, onEvent, onStatus, _action) =>
       openReconnectingCrawlSocket(taskId, onEvent, onStatus),
   };
 }

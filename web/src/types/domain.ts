@@ -65,6 +65,18 @@ export interface Project {
   logSnapshot: CrawlLogEntry[];
 }
 
+export type ProjectAction = "add" | "subtract" | "extract" | "summarize";
+
+export interface ProjectActionRequest {
+  projectId: string;
+  action: ProjectAction;
+}
+
+export interface ProjectActionResponse {
+  taskId: string;
+  streamPath: string;
+}
+
 export interface SchedulerProfile {
   id: string;
   name: string;

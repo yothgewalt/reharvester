@@ -9,6 +9,9 @@ import type {
   HarvestInitResponse,
   HealthStatus,
   JobRegisterRequest,
+  ProjectAction,
+  ProjectActionRequest,
+  ProjectActionResponse,
   SchedulerProfile,
   TrendKeyword,
   WsStatus,
@@ -34,6 +37,7 @@ export interface CrawlSocketHandle {
 export interface ApiTransport {
   health(): Promise<HealthStatus>;
   harvestInit(req: HarvestInitRequest): Promise<HarvestInitResponse>;
+  applyProjectAction(req: ProjectActionRequest): Promise<ProjectActionResponse>;
   registerJob(req: JobRegisterRequest): Promise<SchedulerProfile>;
   getGraphSnapshot(kind: GraphKind): Promise<GraphSnapshot>;
   getWikiRaw(docId: string): Promise<string>;
@@ -43,6 +47,7 @@ export interface ApiTransport {
     taskId: string,
     onEvent: (e: CrawlStreamEvent) => void,
     onStatus: (s: WsStatus) => void,
+    action?: ProjectAction,
   ): CrawlSocketHandle;
 }
 

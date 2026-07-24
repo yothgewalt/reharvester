@@ -1,6 +1,6 @@
-import type { CrawlLogEntry, CrawlStreamEvent, GraphEdge, GraphNode } from "@/types/domain";
+import type { CrawlLogEntry, CrawlStreamEvent, GraphEdge, GraphNode, ProjectAction } from "@/types/domain";
 
-import { DELTA_BATCH } from "./graph";
+import { DELTA_BATCH, generateDeltaBatch } from "./graph";
 
 let logSeq = 0;
 const log = (level: CrawlLogEntry["level"], message: string): CrawlStreamEvent => ({
@@ -30,6 +30,12 @@ export interface ScriptStep {
   event: CrawlStreamEvent;
 }
 
+const actionMessages: Record<ProjectAction, { started: string; done: string }> = {
+  add: { started: "Expanding graph with additional documents …", done: "Documents added to project graph" },
+  subtract: { started: "Removing unrelated nodes from project graph …", done: "Graph pruned by project context" },
+  extract: { started: "Extracting entities and relations from project docs …", done: "Entities extracted and linked" },
+  summarize: { started: "Summarizing project cluster summaries …", done: "Summaries folded into graph" },
+};
 
 export function buildCrawlScript(query: string): ScriptStep[] {
   const chunks: Array<{ nodes: GraphNode[]; edges: GraphEdge[] }> = [];
@@ -82,6 +88,45 @@ export function buildCrawlScript(query: string): ScriptStep[] {
         type: "done",
         summary: { docsIngested: DELTA_BATCH.nodes.length, durationMs: 30_000 },
       },
+    },
+  );
+
+  return steps;
+}
+
+export function buildActionScript(action: ProjectAction, query: string): ScriptStep[] {
+  const batch = generateDeltaBatch(Date.now());
+  const chunkSize = 5;
+  const chunks: Array<{ nodes: GraphNode[]; edges: GraphEdge[] }> = [];
+  for (let i = 0; i < batch.nodes.length; i += chunkSize) {
+    const nodes = batch.nodes.slice(i, i + chunkSize);
+    const ids = new Set(nodes.map((n) => n.id));
+    chunks.push({ nodes, edges: batch.edges.filter((e) => ids.has(e.source)) });
+  }
+
+  const messages = actionMessages[action];
+  const steps: ScriptStep[] = [
+    { delayMs: 200, event: log("info", `Action "${action}" requested for: "${query.slice(0, 80)}"`) },
+    { delayMs: 400, event: log("info", messages.started) },
+    { delayMs: 500, event: progress(15, `${action}-start`) },
+  ];
+
+  let pct = 25;
+  chunks.forEach((chunk, i) => {
+    steps.push(
+      { delayMs: 600, event: log("info", `Processing batch ${i + 1}/${chunks.length}`) },
+      { delayMs: 400, event: progress(Math.min(90, pct), `${action}-batch`) },
+      { delayMs: 400, event: delta(chunk.nodes, chunk.edges) },
+    );
+    pct += Math.floor(60 / chunks.length);
+  });
+
+  steps.push(
+    { delayMs: 500, event: progress(100, "done") },
+    { delayMs: 300, event: log("success", messages.done) },
+    {
+      delayMs: 200,
+      event: { type: "done", summary: { docsIngested: batch.nodes.length, durationMs: 8_000 } },
     },
   );
 
