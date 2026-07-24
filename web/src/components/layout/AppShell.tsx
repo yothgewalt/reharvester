@@ -1,7 +1,6 @@
 "use client";
 
 import FolderOutlined from "@mui/icons-material/FolderOutlined";
-import ScheduleOutlined from "@mui/icons-material/ScheduleOutlined";
 import TravelExploreOutlined from "@mui/icons-material/TravelExploreOutlined";
 import Typography from "@mui/material/Typography";
 import Link from "next/link";
@@ -23,10 +22,6 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       { href: "/", label: "Harvest", icon: TravelExploreOutlined },
       { href: "/projects", label: "Projects", icon: FolderOutlined },
     ],
-  },
-  {
-    label: "Automation",
-    items: [{ href: "/scheduler", label: "Scheduler", icon: ScheduleOutlined }],
   },
 ];
 

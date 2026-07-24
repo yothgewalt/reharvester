@@ -1,5 +1,6 @@
 "use client";
 
+import ScheduleOutlined from "@mui/icons-material/ScheduleOutlined";
 import Chip from "@mui/material/Chip";
 import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
@@ -11,10 +12,12 @@ import { CorpusBrowser } from "@/components/corpus/CorpusSection";
 import { CrawlLogTerminal } from "@/components/ingestion/CrawlLogTerminal";
 import { GraphExplorer } from "@/components/graph/GraphSection";
 import { SectionShell } from "@/components/layout/SectionShell";
+import { ActiveCrawlers } from "@/components/scheduler/ActiveCrawlers";
+import { SchedulerForm } from "@/components/scheduler/SchedulerForm";
 import { formatRelative } from "@/lib/relative-time";
 import { useProjectsStore } from "@/store/projects";
 
-type TabKey = "graph" | "corpus" | "log";
+type TabKey = "graph" | "corpus" | "log" | "scheduler";
 
 
 export function ProjectDetail({ id }: { id: string }) {
@@ -58,6 +61,12 @@ export function ProjectDetail({ id }: { id: string }) {
           <Tab value="graph" label="Graph" />
           <Tab value="corpus" label="Corpus" />
           <Tab value="log" label="Crawl log" />
+          <Tab
+            value="scheduler"
+            icon={<ScheduleOutlined fontSize="small" />}
+            iconPosition="start"
+            label="Scheduler"
+          />
         </Tabs>
       </div>
 
@@ -72,6 +81,12 @@ export function ProjectDetail({ id }: { id: string }) {
             {project.status === "crawling" ? " — the crawl is still running." : "."}
           </Typography>
         )
+      ) : null}
+      {tab === "scheduler" ? (
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+          <SchedulerForm />
+          <ActiveCrawlers />
+        </div>
       ) : null}
     </SectionShell>
   );
