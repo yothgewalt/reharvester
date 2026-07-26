@@ -18,10 +18,10 @@ coverage.out
 
 # Next.js / TypeScript
 /node_modules/
-/.next/
-/out/
-/build/
-/dist/
+/web/.next/
+/web/out/
+/web/build/
+/web/dist/
 *.tsbuildinfo
 .env
 .env.local
