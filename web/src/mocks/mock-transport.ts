@@ -1,5 +1,11 @@
 import type { ApiTransport } from "@/lib/api/transport";
-import type { HarvestInitRequest, JobRegisterRequest, SchedulerProfile } from "@/types/domain";
+import type {
+  HarvestInitRequest,
+  JobRegisterRequest,
+  ProjectAction,
+  ProjectActionRequest,
+  SchedulerProfile,
+} from "@/types/domain";
 
 import { getGapFixture } from "./fixtures/gaps";
 import { getMockSnapshot, MOCK_GRAPH } from "./fixtures/graph";
@@ -16,6 +22,7 @@ const LLM_STATUS: "ok" | "unreachable" =
 let jobSeq = 0;
 let taskSeq = 0;
 let lastQuery = "";
+let lastAction: ProjectAction | undefined;
 
 export function createMockTransport(): ApiTransport {
   return {
@@ -43,6 +50,14 @@ export function createMockTransport(): ApiTransport {
         createdAt: new Date().toISOString(),
         status: "active",
       };
+    },
+
+    async applyProjectAction(req: ProjectActionRequest) {
+      await sleep();
+      lastQuery = `project ${req.projectId}`;
+      lastAction = req.action;
+      const taskId = `mock-task-${++taskSeq}`;
+      return { taskId, streamPath: `/api/v1/harvest/stream/${taskId}` };
     },
 
     async getGraphSnapshot(kind) {
@@ -79,7 +94,7 @@ export function createMockTransport(): ApiTransport {
 
     openCrawlSocket(taskId, onEvent, onStatus) {
       void taskId;
-      return new MockCrawlSocket(lastQuery, onEvent, onStatus);
+      return new MockCrawlSocket(lastQuery, onEvent, onStatus, lastAction);
     },
   };
 }

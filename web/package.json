@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "pages:build": "next build",
+    "pages:deploy": "wrangler pages deploy",
+    "pages:preview": "wrangler pages dev dist"
   },
   "dependencies": {
     "@emotion/cache": "11.14.0",

@@ -17,6 +17,12 @@
 /.next/
 /out/
 
+# cloudflare pages static export
+/dist/
+
+# wrangler
+/.wrangler/
+
 # production
 /build
 

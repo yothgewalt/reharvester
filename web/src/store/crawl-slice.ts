@@ -5,6 +5,7 @@ import type {
   CrawlLogEntry,
   CrawlStreamEvent,
   IngestPayload,
+  ProjectAction,
   WsStatus,
 } from "@/types/domain";
 
@@ -52,6 +53,7 @@ export interface CrawlSlice {
   consoleLogHistory: CrawlLogEntry[];
   wsStatus: WsStatus;
   startCrawl(payload: IngestPayload): Promise<void>;
+  startProjectAction(projectId: string, action: ProjectAction): Promise<void>;
   appendLog(entry: CrawlLogEntry): void;
   handleStreamEvent(e: CrawlStreamEvent): void;
   finishCrawl(): void;
@@ -126,6 +128,43 @@ export const createCrawlSlice: StateCreator<AppState, [], [], CrawlSlice> = (set
     } catch (err) {
       get().appendLog(
         localLog("error", `Harvest init failed: ${err instanceof Error ? err.message : String(err)}`),
+      );
+      set({ isCrawlActive: false, wsStatus: "closed" });
+    }
+  },
+
+  startProjectAction: async (projectId, action) => {
+    if (get().isCrawlActive) return;
+    const project = useProjectsStore.getState().projects.find((p) => p.id === projectId);
+    if (!project) return;
+
+    set({
+      isCrawlActive: true,
+      activeTask: `${project.name} — ${action}`,
+      activeTaskId: projectId,
+      crawlProgress: null,
+      crawlStage: null,
+      consoleLogHistory: [],
+      wsStatus: "connecting",
+    });
+    get().appendLog(localLog("info", `Starting project action: ${action} …`));
+
+    if (get().nodes.length === 0 && !get().graphLoading) void get().loadGraphSnapshot();
+    try {
+      const res = await transport.applyProjectAction({ projectId, action });
+      set({ activeTaskId: res.taskId });
+      socketHandle = transport.openCrawlSocket(
+        res.taskId,
+        (e) => get().handleStreamEvent(e),
+        (s: WsStatus) => {
+          set({ wsStatus: s });
+          if (s === "closed" && get().isCrawlActive) get().finishCrawl();
+        },
+        action,
+      );
+    } catch (err) {
+      get().appendLog(
+        localLog("error", `Project action failed: ${err instanceof Error ? err.message : String(err)}`),
       );
       set({ isCrawlActive: false, wsStatus: "closed" });
     }
