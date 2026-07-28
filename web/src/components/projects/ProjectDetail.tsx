@@ -78,7 +78,7 @@ export function ProjectDetail({ id }: { id: string }) {
       }
     >
       {}
-      <div className="flex items-end justify-between gap-4 border-b border-line">
+      <div className="flex items-center justify-between gap-4 border-b border-line">
         <Tabs
           value={tab}
           onChange={(_, v: TabKey) => setTab(v)}
@@ -117,10 +117,11 @@ export function ProjectDetail({ id }: { id: string }) {
           placement="bottom-end"
           transition
           disablePortal
+          sx={{ zIndex: (t) => t.zIndex.modal }}
         >
           {({ TransitionProps }) => (
             <Grow {...TransitionProps}>
-              <Paper sx={{ zIndex: 100 }} id="project-action-menu">
+              <Paper id="project-action-menu">
                 <ClickAwayListener onClickAway={() => setMenuOpen(false)}>
                   <MenuList autoFocusItem>
                     {ACTIONS.map((a) => (

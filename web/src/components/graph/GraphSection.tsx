@@ -50,7 +50,7 @@ export function GraphExplorer() {
           Select a node to reveal its relations (node —[relation]→ node).
         </span>
       ) : null}
-      <div className="overflow-hidden rounded-2xl bg-card-dark ring-line-dark">
+      <div className="overflow-hidden rounded-md bg-card-dark ring-line-dark">
         {canvasState === "pending" ? <GraphSkeleton /> : null}
         {canvasState === "unsupported" ? (
           <Alert severity="warning" className="m-6">
