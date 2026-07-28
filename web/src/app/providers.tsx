@@ -2,7 +2,6 @@
 import { ThemeProvider } from "@mui/material/styles";
 import type { ReactNode } from "react";
 
-import { BackendOfflineOverlay } from "@/components/system/BackendOfflineOverlay";
 import { BootSplash } from "@/components/system/BootSplash";
 import { useBackendHealth } from "@/lib/api/health";
 import { useAppStore } from "@/store";
@@ -22,10 +21,5 @@ function HealthGate({ children }: { children: ReactNode }) {
 
   if (backendStatus === "checking") return <BootSplash />;
 
-  return (
-    <>
-      {children}
-      <BackendOfflineOverlay />
-    </>
-  );
+  return <>{children}</>;
 }
