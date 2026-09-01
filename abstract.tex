@@ -43,27 +43,37 @@ to inspection.
 Reharvester couples four stages. \textbf{Ingestion} gates a harvest on a meaningful
 query---at least five keywords or a short abstract---then crawls matching papers while
 streaming progress and a live terminal log to the user. \textbf{Graph construction}
-renders the resulting corpus as a WebGL knowledge graph in which node size reflects
-PageRank centrality, five interchangeable layouts reveal different structure, one-hop
-highlighting traces neighborhoods, and a research-gap overlay marks sparsely connected
-regions worth exploring. \textbf{Trend analysis} ranks keywords by the regression slope
+builds a mutual $k$-nearest-neighbour backbone over TF--IDF cosine similarity, partitions
+it into topical communities with Louvain modularity, and scores every paper by PageRank
+centrality and by a bridge score---the fraction of its edge weight crossing a community
+boundary---which operationalises the structural-hole intuition at document level.
+\textbf{Trend analysis} ranks keywords by the regression slope
 of their frequency over a user-adjustable multi-year window, distinguishing durable
-themes from noise. \textbf{Corpus access} pairs a searchable, open-access-filterable
-paper list with an Obsidian-style wiki pane whose \texttt{[[wikilinks]]} select and
-center the corresponding graph node; a local language model answers questions through
-retrieval-augmented generation grounded in the graph.
+themes from noise, and presents them beside a coarse-grained field map that aggregates
+the backbone to its communities: one node per community above a size threshold, edges
+for the inter-community links above a count threshold, the largest labelled.
+\textbf{Corpus access} presents the corpus as a three-pane reader:
+the communities form a navigable index, the centre pane renders one paper with its
+metadata and an Obsidian-style \texttt{[[wikilink]]} abstract, and its nearest
+neighbours are listed along the backbone with their cosine similarities, so navigation
+follows semantic adjacency rather than a ranked list. A local language model answers
+questions through retrieval-augmented generation grounded in that graph.
 
 \section{Implementation and Results}
 The system is implemented as a Go harvesting server and a Next.js~16 single-page
-interface using Reagraph for WebGL rendering and Zustand for client-global state that
-survives navigation, so crawls and selections persist across views. A built-in mock mode
-ships a seeded 450-node corpus, a simulated crawl stream, and trend and wiki fixtures,
-letting the full interface run with no backend---useful for demonstration and offline
-evaluation. The renderer scales to a ten-thousand-node stress mode, automatically
-shedding labels and animation as node counts grow, and resilience is built in throughout:
-health polling with automatic recovery, a WebGL fallback path, and an explicit
-model-unreachable indicator when the local model is down. Together these choices deliver
-a private, portable, and responsive tool for exploring a research field end to end.
+interface using Zustand for client-global state that survives navigation, so crawls and
+selections persist across views. The interface is deliberately plain DOM: an earlier
+WebGL rendering of the whole graph was replaced by the three-pane reader, which removes
+a heavyweight rendering dependency and, more importantly, matches how the corpus is
+actually read---one paper at a time, following the backbone---rather than viewed as a
+whole. The question-answering panel exposes its own context set, labelling each admitted
+document as a retrieval seed or a graph expansion and reporting the word budget it was
+assembled under, so the retrieval decision is auditable rather than hidden behind the
+generated prose. Resilience is built in throughout: health polling with automatic
+recovery, a capability-tier indicator, and an explicit model-unreachable state in which
+the assembled context is still returned and presented as the result. Together these
+choices deliver a private, portable, and responsive tool for exploring a research field
+end to end.
 
 \vspace{1em}
 \noindent\textbf{Keywords:} literature discovery; knowledge graph; local-first;

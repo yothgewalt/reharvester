@@ -17,9 +17,8 @@ import Typography from "@mui/material/Typography";
 import Link from "next/link";
 import { useState } from "react";
 
-import { CorpusBrowser } from "@/components/corpus/CorpusSection";
 import { CrawlLogTerminal } from "@/components/ingestion/CrawlLogTerminal";
-import { GraphExplorer } from "@/components/graph/GraphSection";
+import { ReaderWorkbench } from "@/components/reader/ReaderWorkbench";
 import { SectionShell } from "@/components/layout/SectionShell";
 import { ActiveCrawlers } from "@/components/scheduler/ActiveCrawlers";
 import { SchedulerForm } from "@/components/scheduler/SchedulerForm";
@@ -28,7 +27,7 @@ import { useAppStore } from "@/store";
 import { useProjectsStore } from "@/store/projects";
 import type { ProjectAction } from "@/types/domain";
 
-type TabKey = "graph" | "corpus" | "log" | "scheduler";
+type TabKey = "reader" | "log" | "scheduler";
 
 const ACTIONS: { value: ProjectAction; label: string }[] = [
   { value: "add", label: "Add" },
@@ -42,7 +41,7 @@ export function ProjectDetail({ id }: { id: string }) {
   const project = useProjectsStore((s) => s.projects.find((p) => p.id === id));
   const isCrawlActive = useAppStore((s) => s.isCrawlActive);
   const startProjectAction = useAppStore((s) => s.startProjectAction);
-  const [tab, setTab] = useState<TabKey>("graph");
+  const [tab, setTab] = useState<TabKey>("reader");
   const [menuOpen, setMenuOpen] = useState(false);
   const [actionButton, setActionButton] = useState<HTMLButtonElement | null>(null);
 
@@ -85,8 +84,7 @@ export function ProjectDetail({ id }: { id: string }) {
           aria-label="Project views"
           sx={{ "& .MuiTab-root": { p: 0 } }}
         >
-          <Tab value="graph" label="Graph" />
-          <Tab value="corpus" label="Corpus" />
+          <Tab value="reader" label="Reader" />
           <Tab value="log" label="Crawl log" />
           <Tab
             value="scheduler"
@@ -130,7 +128,7 @@ export function ProjectDetail({ id }: { id: string }) {
                         disabled={isCrawlActive}
                         onClick={() => {
                           setMenuOpen(false);
-                          setTab("graph");
+                          setTab("reader");
                           void startProjectAction(project.id, a.value);
                         }}
                       >
@@ -145,8 +143,7 @@ export function ProjectDetail({ id }: { id: string }) {
         </Popper>
       </div>
 
-      {tab === "graph" ? <GraphExplorer /> : null}
-      {tab === "corpus" ? <CorpusBrowser /> : null}
+      {tab === "reader" ? <ReaderWorkbench /> : null}
       {tab === "log" ? (
         project.logSnapshot.length > 0 ? (
           <CrawlLogTerminal entries={project.logSnapshot} />

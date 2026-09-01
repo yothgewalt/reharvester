@@ -1,6 +1,8 @@
 "use client";
 
+import AutoGraphOutlined from "@mui/icons-material/AutoGraphOutlined";
 import FolderOutlined from "@mui/icons-material/FolderOutlined";
+import MenuBookOutlined from "@mui/icons-material/MenuBookOutlined";
 import TravelExploreOutlined from "@mui/icons-material/TravelExploreOutlined";
 import Typography from "@mui/material/Typography";
 import Link from "next/link";
@@ -20,6 +22,8 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
     label: "Workspace",
     items: [
       { href: "/", label: "Harvest", icon: TravelExploreOutlined },
+      { href: "/trends", label: "Trends", icon: AutoGraphOutlined },
+      { href: "/reader", label: "Reader", icon: MenuBookOutlined },
       { href: "/projects", label: "Projects", icon: FolderOutlined },
     ],
   },

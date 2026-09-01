@@ -1,11 +1,11 @@
 "use client";
 import { useEffect } from "react";
 
-import { API_BASE, USE_MOCKS } from "@/lib/config";
+import { API_BASE } from "@/lib/config";
 import { useAppStore } from "@/store";
+import type { CapabilityTier } from "@/types/domain";
 
 import { onBackendFailure } from "./failure-bus";
-import { transport } from "./transport";
 
 const OFFLINE_POLL_MS = 10_000;
 const ONLINE_POLL_MS = 30_000;
@@ -30,27 +30,24 @@ export function useBackendHealth(): void {
     const ping = async () => {
       if (disposed || pinging) return;
       pinging = true;
-      const { setBackendStatus, setLlmStatus } = useAppStore.getState();
+      const { setBackendStatus, setLlmStatus, setCapabilityTier } = useAppStore.getState();
       try {
-        if (USE_MOCKS) {
-          const health = await transport.health();
-          setBackendStatus("mocked");
-          setLlmStatus(health.llm);
-          pinging = false;
-          return;
-        }
         const res = await fetch(`${API_BASE}/health`, {
           signal: AbortSignal.timeout(PING_TIMEOUT_MS),
         });
         if (!res.ok) throw new Error(`health ${res.status}`);
-        const health = (await res.json()) as { llm?: "ok" | "unreachable" };
+        const health = (await res.json()) as {
+          llm?: "ok" | "unreachable";
+          tier?: CapabilityTier;
+        };
         setBackendStatus("online");
         setLlmStatus(health.llm ?? "unknown");
+        setCapabilityTier(health.tier ?? null);
       } catch {
         setBackendStatus("offline");
       } finally {
         pinging = false;
-        if (!USE_MOCKS) schedule();
+        schedule();
       }
     };
 

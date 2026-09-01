@@ -27,7 +27,7 @@ export const theme = createTheme({
       },
     },
     // NOTE: deliberately NO dark scheme. The app is light-only (plane.so taste);
-    // dark surfaces (canvas, terminal) are Tailwind/reagraph colors, not MUI schemes.
+    // dark surfaces (canvas, terminal) are Tailwind colors, not MUI schemes.
     // Defining `dark` here made MUI follow the OS dark mode ("system" default) and
     // paint light-gray text onto the white Tailwind surfaces.
   },

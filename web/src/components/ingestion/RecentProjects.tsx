@@ -38,7 +38,7 @@ export function ProjectStatusChip({ status }: { status: Project["status"] }) {
 export function ProjectRow({ project }: { project: Project }) {
   return (
     <Link
-      href={`/projects/${project.id}`}
+      href={`/projects/detail?id=${encodeURIComponent(project.id)}`}
       className="flex items-center justify-between gap-4 border-t border-line py-3 px-3 transition-colors duration-150 first:border-t-0 hover:bg-bg-faint"
     >
       <div className="flex min-w-0 flex-col">

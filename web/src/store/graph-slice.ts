@@ -1,76 +1,48 @@
 import type { StateCreator } from "zustand";
 
 import { transport } from "@/lib/api/transport";
-import type { GraphEdge, GraphKind, GraphNode, LayoutPreset } from "@/types/domain";
+import type { Community, CommunityLink, GraphEdge, GraphNode } from "@/types/domain";
 
 import type { AppState } from "./index";
 
-export type FocusOrigin = "canvas" | "external" | null;
-
-let gapSeq = 0;
 
 
 
-const graphCache: Partial<Record<GraphKind, { nodes: GraphNode[]; edges: GraphEdge[] }>> = {};
+
+let graphCache: { nodes: GraphNode[]; edges: GraphEdge[] } | null = null;
 
 export interface GraphSlice {
   nodes: GraphNode[];
   edges: GraphEdge[];
-  graphKind: GraphKind;
   graphLoading: boolean;
   graphError: string | null;
-  activeLayout: LayoutPreset;
-  setGraphKind(kind: GraphKind): void;
   selectedNodeId: string | null;
   selectedDocId: string | null;
-  focusOrigin: FocusOrigin;
-  isGapAnalysisOverlayActive: boolean;
-  gapNodeIds: string[];
+  communities: Community[];
+  communityLinks: CommunityLink[];
+  communitiesLoading: boolean;
+  selectedCommunitySlug: string | null;
+  loadCommunities(): Promise<void>;
+  selectCommunity(slug: string | null): void;
   loadGraphSnapshot(): Promise<void>;
   applyGraphDelta(d: { addedNodes: GraphNode[]; addedEdges: GraphEdge[] }): void;
-  setLayout(l: LayoutPreset): void;
-  selectNode(nodeId: string, docId: string, origin: Exclude<FocusOrigin, null>): void;
-  clearSelection(): void;
-  toggleGapOverlay(): Promise<void>;
+  selectNode(nodeId: string, docId: string): void;
 }
 
 export const createGraphSlice: StateCreator<AppState, [], [], GraphSlice> = (set, get) => ({
   nodes: [],
   edges: [],
-  graphKind: "knowledge",
   graphLoading: false,
   graphError: null,
-  activeLayout: "forceDirected2d",
   selectedNodeId: null,
   selectedDocId: null,
-  focusOrigin: null,
-  isGapAnalysisOverlayActive: false,
-  gapNodeIds: [],
-
-  setGraphKind: (kind) => {
-    if (get().graphKind === kind) return;
-    get().clearSelection();
-    set({
-      graphKind: kind,
-
-      ...(kind !== "knowledge" ? { isGapAnalysisOverlayActive: false } : {}),
-    });
-    const cached = graphCache[kind];
-    if (cached) {
-      set({ nodes: cached.nodes, edges: cached.edges, graphError: null });
-    } else {
-      void get().loadGraphSnapshot();
-    }
-  },
 
   loadGraphSnapshot: async () => {
-    const kind = get().graphKind;
     set({ graphLoading: true, graphError: null });
     try {
-      const snap = await transport.getGraphSnapshot(kind);
+      const snap = await transport.getGraphSnapshot();
 
-
-      const cached = graphCache[kind];
+      const cached = graphCache;
       let nodes = snap.nodes;
       let edges = snap.edges;
       if (cached && cached.nodes.length > 0) {
@@ -85,11 +57,9 @@ export const createGraphSlice: StateCreator<AppState, [], [], GraphSlice> = (set
           ),
         ];
       }
-      graphCache[kind] = { nodes, edges };
-      if (get().graphKind !== kind) return;
+      graphCache = { nodes, edges };
       set({ nodes, edges, graphLoading: false });
     } catch (err) {
-      if (get().graphKind !== kind) return;
       set({
         graphLoading: false,
         graphError: err instanceof Error ? err.message : "Failed to load graph snapshot",
@@ -99,7 +69,7 @@ export const createGraphSlice: StateCreator<AppState, [], [], GraphSlice> = (set
 
   applyGraphDelta: ({ addedNodes, addedEdges }) => {
 
-    const cache = graphCache.knowledge ?? { nodes: [], edges: [] };
+    const cache = graphCache ?? { nodes: [], edges: [] };
     const known = new Set(cache.nodes.map((n) => n.id));
     const knownEdges = new Set(cache.edges.map((e) => e.id));
     const freshNodes = addedNodes.filter((n) => !known.has(n.id));
@@ -108,37 +78,46 @@ export const createGraphSlice: StateCreator<AppState, [], [], GraphSlice> = (set
       (e) => !knownEdges.has(e.id) && known.has(e.source) && known.has(e.target),
     );
     if (freshNodes.length === 0 && freshEdges.length === 0) return;
-    graphCache.knowledge = {
+    graphCache = {
       nodes: [...cache.nodes, ...freshNodes],
       edges: [...cache.edges, ...freshEdges],
     };
-    if (get().graphKind === "knowledge") {
-      set({ nodes: graphCache.knowledge.nodes, edges: graphCache.knowledge.edges });
+    set({ nodes: graphCache.nodes, edges: graphCache.edges });
+  },
+
+  communities: [],
+  communityLinks: [],
+  communitiesLoading: false,
+  selectedCommunitySlug: null,
+
+  loadCommunities: async () => {
+    if (get().communities.length > 0 || get().communitiesLoading) return;
+    set({ communitiesLoading: true });
+    try {
+      const [communities, communityLinks] = await Promise.all([
+        transport.listCommunities(),
+        transport.listCommunityLinks(),
+      ]);
+      set({ communities, communityLinks, communitiesLoading: false });
+    } catch {
+      // The header already surfaces backend trouble; an empty rail is enough here.
+      set({ communitiesLoading: false });
     }
   },
 
-  setLayout: (activeLayout) => set({ activeLayout }),
+  selectCommunity: (slug) => {
+    set({ selectedCommunitySlug: slug });
+    if (!slug) return;
+    const c = get().communities.find((x) => x.slug === slug);
+    const first = c?.memberDocIds[0];
+    if (first) get().selectNode(first, first);
+  },
 
-  selectNode: (nodeId, docId, origin) => {
-    set({ selectedNodeId: nodeId, selectedDocId: docId, focusOrigin: origin });
+  selectNode: (nodeId, docId) => {
+    set({ selectedNodeId: nodeId, selectedDocId: docId });
     void get().loadWikiDoc(docId);
   },
 
-  clearSelection: () => set({ selectedNodeId: null, focusOrigin: null }),
 
-  toggleGapOverlay: async () => {
-    const turningOn = !get().isGapAnalysisOverlayActive;
-    const seq = ++gapSeq;
-    set({ isGapAnalysisOverlayActive: turningOn });
-    if (turningOn && get().gapNodeIds.length === 0) {
-      try {
-        const res = await transport.getGapPositions();
-        if (seq !== gapSeq) return;
-        set({ gapNodeIds: res.gapNodeIds });
-      } catch {
-        if (seq !== gapSeq) return;
-        set({ isGapAnalysisOverlayActive: false });
-      }
-    }
-  },
+
 });

@@ -11,12 +11,22 @@ export interface SchedulerSlice {
   schedulerError: string | null;
 
   registerProfile(req: JobRegisterRequest): Promise<boolean>;
+  loadJobs(): Promise<void>;
 }
 
 export const createSchedulerSlice: StateCreator<AppState, [], [], SchedulerSlice> = (set) => ({
   schedulerProfiles: [],
   schedulerSubmitting: false,
   schedulerError: null,
+
+  loadJobs: async () => {
+    try {
+      set({ schedulerProfiles: await transport.listJobs() });
+    } catch {
+      // A missing job list is not worth blocking the page over; the form still
+      // works and the next registration repopulates the list.
+    }
+  },
 
   registerProfile: async (req) => {
     set({ schedulerSubmitting: true, schedulerError: null });

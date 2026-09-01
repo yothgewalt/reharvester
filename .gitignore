@@ -33,3 +33,12 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .vercel
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/
+
+# Local corpus + artefacts (regenerable: --harvest)
+/.reharvester/
+
+# Playwright MCP scratch output
+.playwright-mcp/
