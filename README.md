@@ -19,7 +19,7 @@ go run ./cmd/harvester-server --harvest --project dev \
 go run ./cmd/harvester-server --build --project dev
 
 # 3. Serve the API and the UI together (Ctrl-C stops both)
-./dev.sh -project dev                               # :8000 and :3000
+./dev.sh                                            # :8000 and :3000
 ```
 
 Optional, for the top rung of the ladder and for wiki synthesis:
