@@ -1,0 +1,2 @@
+# Placeholder so the go:embed directive in webui.go compiles from a clean
+# checkout. The release script overwrites this directory with web/dist.

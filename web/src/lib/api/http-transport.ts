@@ -48,6 +48,47 @@ async function getJson<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+
+/**
+ * Reads one Server-Sent Events stream from a POST.
+ *
+ * EventSource cannot POST, so this drives fetch's ReadableStream directly.
+ * Frames are separated by a blank line; anything not yet terminated stays in
+ * the buffer until the rest of it arrives, because a chunk boundary can fall
+ * anywhere — including mid-frame, which is exactly what token-by-token output
+ * produces.
+ */
+async function readSSE(
+  res: Response,
+  onEvent: (event: string, data: string) => void,
+): Promise<void> {
+  const body = res.body;
+  if (!body) throw new Error("no response body to stream");
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let split = buffer.indexOf("\n\n");
+    while (split !== -1) {
+      const frame = buffer.slice(0, split);
+      buffer = buffer.slice(split + 2);
+      let event = "message";
+      const data: string[] = [];
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data.push(line.slice(5).trim());
+      }
+      if (data.length > 0) onEvent(event, data.join("\n"));
+      split = buffer.indexOf("\n\n");
+    }
+  }
+}
+
 async function postJson<T>(path: string, body: unknown, timeoutMs?: number): Promise<T> {
   const res = await request(
     path,
@@ -67,6 +108,51 @@ export function createHttpTransport(): ApiTransport {
     listGapPairs: () => getJson<GapReport>("/api/v1/gaps/pairs"),
     listCommunityLinks: () => getJson<CommunityLink[]>("/api/v1/communities/links"),
     ask: (req: AskRequest) => postJson<AskResponse>("/api/v1/ask", req, ASK_TIMEOUT_MS),
+
+    askStream: async (req, handlers, signal) => {
+      // No AbortSignal.timeout here: the stream is alive as long as tokens keep
+      // arriving, and generation legitimately runs for minutes on a slow CPU.
+      // The caller aborts instead, which is what a new question does.
+      let res: Response;
+      try {
+        res = await fetch(`${API_BASE}/api/v1/ask/stream`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(req),
+          signal,
+        });
+      } catch (err) {
+        if ((err as Error)?.name === "AbortError") return;
+        reportBackendFailure();
+        throw new ApiError(0, "cannot reach the local API", "/api/v1/ask/stream");
+      }
+      if (!res.ok) {
+        throw new ApiError(res.status, await res.text().catch(() => res.statusText), "/api/v1/ask/stream");
+      }
+      try {
+        await readSSE(res, (event, data) => {
+          switch (event) {
+            case "sources":
+              handlers.onSources(JSON.parse(data));
+              break;
+            case "token":
+              handlers.onToken(JSON.parse(data).text as string);
+              break;
+            case "done": {
+              const d = JSON.parse(data);
+              handlers.onDone(d.answer as string, Boolean(d.generated));
+              break;
+            }
+            case "error":
+              handlers.onError(JSON.parse(data).message as string);
+              break;
+          }
+        });
+      } catch (err) {
+        if ((err as Error)?.name === "AbortError") return;
+        throw err;
+      }
+    },
     harvestInit: (req: HarvestInitRequest) => {
       if (req.pdf && req.pdf.length > 0) {
 

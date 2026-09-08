@@ -12,6 +12,7 @@ export function AskRail() {
   const setQuestion = useAppStore((s) => s.setAskQuestion);
   const submitAsk = useAppStore((s) => s.submitAsk);
   const loading = useAppStore((s) => s.askLoading);
+  const streaming = useAppStore((s) => s.askStreaming);
   const result = useAppStore((s) => s.askResult);
   const error = useAppStore((s) => s.askError);
   const llmStatus = useAppStore((s) => s.llmStatus);
@@ -46,7 +47,7 @@ export function AskRail() {
           fullWidth
         />
         <Button type="submit" variant="contained" disabled={loading || !question.trim()}>
-          {loading ? "Assembling…" : "Ask"}
+          {loading ? "Assembling…" : streaming ? "Ask again" : "Ask"}
         </Button>
       </form>
 
@@ -81,14 +82,33 @@ export function AskRail() {
 
           <div
             role="status"
-            aria-live="polite"
-            aria-busy={loading}
+            /* Announcing every token would make a screen reader read the answer
+               a word at a time. Stay silent while it streams and announce the
+               finished text once. */
+            aria-live={streaming ? "off" : "polite"}
+            aria-busy={loading || streaming}
             className="flex flex-col gap-2 rounded-xl p-4 ring-line"
           >
             <Typography variant="subtitle2" component="h3">
               {grounded ? "Grounded answer" : "Context set only"}
+              {streaming ? (
+                <span className="ml-2 font-mono text-[11px] font-normal text-ink-3">
+                  writing…
+                </span>
+              ) : null}
             </Typography>
-            <p className="m-0 text-[13px] leading-6 text-ink-2">{result.answer}</p>
+            {result.answer ? (
+              <p className="m-0 text-[13px] leading-6 text-ink-2">
+                {result.answer}
+                {streaming ? <span aria-hidden="true">▍</span> : null}
+              </p>
+            ) : (
+              <p className="m-0 text-[13px] leading-6 text-ink-3">
+                {streaming
+                  ? "The sources above are ready. The model is writing the answer."
+                  : "No answer yet."}
+              </p>
+            )}
           </div>
         </>
       ) : null}

@@ -1,0 +1,41 @@
+{
+  "name": "reharvester",
+  "version": "0.1.0",
+  "description": "Local-first system for interactive research-literature discovery — harvest arXiv, build a knowledge graph, and explore it offline",
+  "keywords": [
+    "research",
+    "literature",
+    "arxiv",
+    "knowledge-graph",
+    "retrieval",
+    "bibliometrics",
+    "local-first",
+    "tui"
+  ],
+  "homepage": "https://github.com/yothgewalt/reharvester",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yothgewalt/reharvester.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yothgewalt/reharvester/issues"
+  },
+  "license": "MIT",
+  "bin": {
+    "reharvester": "bin/reharvester.js"
+  },
+  "files": [
+    "bin/reharvester.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "reharvester-darwin-arm64": "0.1.0",
+    "reharvester-darwin-x64": "0.1.0",
+    "reharvester-linux-arm64": "0.1.0",
+    "reharvester-linux-x64": "0.1.0",
+    "reharvester-win32-x64": "0.1.0"
+  }
+}

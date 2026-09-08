@@ -1,0 +1,74 @@
+name: Release
+
+# Tag-triggered so a release is `git tag v0.2.0 && git push --tags` from any
+# machine, rather than something only this laptop can do.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, without the leading v (e.g. 0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Build and publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+
+      - name: Resolve the version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "Publishing $version"
+
+      - name: Test before publishing
+
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./...
+
+      - name: Build and publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: ./scripts/release.sh --version "${{ steps.version.outputs.value }}" --provenance --publish
+
+      - name: Verify the published package installs
+        run: |
+          for i in $(seq 1 20); do
+            if npm view "reharvester@${{ steps.version.outputs.value }}" version >/dev/null 2>&1; then
+              break
+            fi
+            echo "waiting for the registry ($i/20)"
+            sleep 15
+          done
+          npm install -g "reharvester@${{ steps.version.outputs.value }}"
+          reharvester --version
+          reharvester doctor || true   # warns without Ollama; that is expected

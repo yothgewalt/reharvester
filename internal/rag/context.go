@@ -120,8 +120,21 @@ const answerSystem = `You answer questions using only the numbered sources provi
 Cite sources inline as [1], [2] and so on. If the sources do not contain the
 answer, say so plainly rather than guessing. Be concise.`
 
+// AnswerStream grounds a question in an assembled context set and streams the
+// prose back as it is written. Prefer it wherever a person is waiting: the
+// context set is ready in milliseconds while generation takes seconds, so
+// there is no reason to withhold the first sentence until the last one exists.
+func AnswerStream(ctx context.Context, o *Ollama, question string, docs []ContextDoc, onToken func(string)) (string, error) {
+	return o.GenerateStream(ctx, answerSystem, answerPrompt(question, docs), onToken)
+}
+
 // Answer grounds a question in an assembled context set.
 func Answer(ctx context.Context, o *Ollama, question string, docs []ContextDoc) (string, error) {
+	return o.Generate(ctx, answerSystem, answerPrompt(question, docs))
+}
+
+// answerPrompt lays the numbered sources out for citation.
+func answerPrompt(question string, docs []ContextDoc) string {
 	var b strings.Builder
 	for i, d := range docs {
 		b.WriteString("[")
@@ -132,5 +145,5 @@ func Answer(ctx context.Context, o *Ollama, question string, docs []ContextDoc) 
 		b.WriteString(d.Abstract)
 		b.WriteString("\n\n")
 	}
-	return o.Generate(ctx, answerSystem, "Sources:\n\n"+b.String()+"Question: "+question)
+	return "Sources:\n\n" + b.String() + "Question: " + question
 }

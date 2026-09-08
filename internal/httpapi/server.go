@@ -1,12 +1,15 @@
 package httpapi
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -20,6 +23,7 @@ import (
 	"github.com/yothgewalt/reharvester/internal/pipeline"
 	"github.com/yothgewalt/reharvester/internal/rag"
 	"github.com/yothgewalt/reharvester/internal/store"
+	"github.com/yothgewalt/reharvester/internal/webui"
 )
 
 // Config carries what the server needs that is not derivable from the store.
@@ -121,7 +125,70 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/communities", s.communities)
 	mux.HandleFunc("GET /api/v1/communities/links", s.communityLinks)
 	mux.HandleFunc("POST /api/v1/ask", s.ask)
-	return s.cors(mux)
+	mux.HandleFunc("POST /api/v1/ask/stream", s.askStream)
+
+	// The UI, when it was built into the binary. Everything above is /health or
+	// /api/v1/*, so this catch-all cannot shadow an endpoint. Absent a build it
+	// stays unmounted and the API serves itself.
+	if ui := webui.Handler(); ui != nil {
+		mux.Handle("/", ui)
+	}
+	return s.cors(s.accessLog(mux))
+}
+
+// accessLog records one line per request. It exists because a packaged install
+// serves the UI from this process: without it, a missing asset fails in the
+// browser and leaves no trace anywhere the user can see. Static assets are
+// logged only when they fail, so a page load stays one line rather than fifty.
+func (s *Server) accessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		if isAPIPath(r.URL.Path) || rec.status >= http.StatusBadRequest {
+			log.Printf("http: %d %s %s (%s)", rec.status, r.Method, r.URL.Path,
+				time.Since(start).Round(time.Millisecond))
+		}
+	})
+}
+
+// statusRecorder captures the status code for the access log. Hijack is
+// forwarded because the crawl endpoint upgrades to a WebSocket, and Flush
+// because job progress streams.
+type statusRecorder struct {
+	http.ResponseWriter
+	status  int
+	written bool
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	if !r.written {
+		r.status, r.written = code, true
+	}
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	r.written = true
+	return r.ResponseWriter.Write(b)
+}
+
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("httpapi: response writer does not support hijack")
+	}
+	return h.Hijack()
+}
+
+func isAPIPath(p string) bool {
+	return p == "/health" || strings.HasPrefix(p, "/api/")
 }
 
 // cors admits the Next dev server. The API binds to localhost and holds no
@@ -503,7 +570,33 @@ func jobToProfile(j store.Job) SchedulerProfile {
 	}
 }
 
-func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
+// askSource is one document admitted to the context set, as the UI sees it.
+type askSource struct {
+	DocID    string `json:"docId"` // "" when the paper is outside the snapshot
+	Title    string `json:"title"`
+	ViaGraph bool   `json:"viaGraph"`
+	Words    int    `json:"words"`
+}
+
+type askPrep struct {
+	Question string
+	Docs     []rag.ContextDoc
+	Sources  []askSource
+	Tier     string
+	Budget   int
+	Hops     int
+}
+
+// noModelAnswer stands in when generation is unavailable. The context set is
+// still the useful half of the answer.
+const noModelAnswer = "No local model is available, so no prose was generated. The retrieved sources below are the assembled context."
+
+// prepareAsk does everything up to generation. It is fast — retrieval and
+// context assembly are milliseconds against seconds of decoding — which is why
+// the streaming endpoint can show sources almost immediately.
+//
+// A false second return means a reply has already been written.
+func (s *Server) prepareAsk(w http.ResponseWriter, r *http.Request) (askPrep, bool) {
 	var req struct {
 		Question string `json:"question"`
 		Hops     *int   `json:"hops"` // nil means "unspecified"; 0 disables expansion
@@ -511,12 +604,12 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Question) == "" {
 		http.Error(w, "question is required", http.StatusBadRequest)
-		return
+		return askPrep{}, false
 	}
 	p, snaps := s.active()
 	if p == nil {
 		http.Error(w, "no corpus loaded", http.StatusServiceUnavailable)
-		return
+		return askPrep{}, false
 	}
 	titles := make([]string, len(p.Papers))
 	for i := range p.Papers {
@@ -534,37 +627,117 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	}
 	docs := rag.AssembleContext(p.Engine, titles, p.Corpus.Abstracts, req.Question, budget, hops)
 
-	type source struct {
-		DocID    string `json:"docId"` // "" when the paper is outside the snapshot
-		Title    string `json:"title"`
-		ViaGraph bool   `json:"viaGraph"`
-		Words    int    `json:"words"`
+	prep := askPrep{
+		Question: req.Question, Docs: docs, Sources: []askSource{},
+		Tier: string(p.Tier()), Budget: budget, Hops: hops,
 	}
-	resp := struct {
-		Answer  string   `json:"answer"`
-		Sources []source `json:"sources"`
-		Tier    string   `json:"tier"`
-		Budget  int      `json:"budget"`
-		Hops    int      `json:"hops"`
-	}{Sources: []source{}, Tier: string(p.Tier()), Budget: budget, Hops: hops}
 	for _, d := range docs {
-		resp.Sources = append(resp.Sources, source{
+		prep.Sources = append(prep.Sources, askSource{
 			DocID: snaps.DocIDByPos[d.Pos], Title: d.Title,
 			ViaGraph: d.ViaGraph, Words: d.Words,
 		})
 	}
+	return prep, true
+}
+
+func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
+	prep, ok := s.prepareAsk(w, r)
+	if !ok {
+		return
+	}
+	resp := struct {
+		Answer  string      `json:"answer"`
+		Sources []askSource `json:"sources"`
+		Tier    string      `json:"tier"`
+		Budget  int         `json:"budget"`
+		Hops    int         `json:"hops"`
+	}{Sources: prep.Sources, Tier: prep.Tier, Budget: prep.Budget, Hops: prep.Hops}
+
 	if s.cfg.Ollama != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), askGenerateTimeout)
 		defer cancel()
-		if a, err := rag.Answer(ctx, s.cfg.Ollama, req.Question, docs); err == nil {
+		if a, err := rag.Answer(ctx, s.cfg.Ollama, prep.Question, prep.Docs); err == nil {
 			resp.Answer = a
 		}
 	}
 	if resp.Answer == "" {
-		// No model: the context set is still the useful half of the answer.
-		resp.Answer = "No local model is available, so no prose was generated. The retrieved sources below are the assembled context."
+		resp.Answer = noModelAnswer
 	}
 	writeJSON(w, resp)
+}
+
+// askGenerateTimeout bounds a single answer. Decoding runs at tens of
+// milliseconds per token on a laptop CPU, so a long answer legitimately takes
+// most of a minute; the non-streaming endpoint gets the tighter bound because a
+// caller there is blocked with nothing to show.
+const (
+	askGenerateTimeout = 60 * time.Second
+	askStreamTimeout   = 10 * time.Minute
+)
+
+// askStream answers over Server-Sent Events: the sources first, then the prose
+// token by token.
+//
+// Retrieval costs milliseconds and generation costs seconds, so withholding the
+// whole reply until the last token exists is the difference between a page that
+// responds immediately and one that appears hung. Events are "sources", "token",
+// "done" and "error".
+func (s *Server) askStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	prep, ok := s.prepareAsk(w, r)
+	if !ok {
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("Connection", "keep-alive")
+	h.Set("X-Accel-Buffering", "no") // defeat proxy buffering, which would defeat the point
+	w.WriteHeader(http.StatusOK)
+
+	send := func(event string, payload any) bool {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+
+	send("sources", map[string]any{
+		"sources": prep.Sources, "tier": prep.Tier,
+		"budget": prep.Budget, "hops": prep.Hops,
+	})
+
+	if s.cfg.Ollama == nil {
+		send("done", map[string]any{"answer": noModelAnswer, "generated": false})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), askStreamTimeout)
+	defer cancel()
+
+	answer, err := rag.AnswerStream(ctx, s.cfg.Ollama, prep.Question, prep.Docs,
+		func(chunk string) { send("token", map[string]string{"text": chunk}) })
+
+	// A partial answer plus an error still beats discarding what arrived: the
+	// reader has already seen those tokens on screen.
+	if err != nil && answer == "" {
+		log.Printf("api: ask stream: %v", err)
+		send("error", map[string]string{"message": "generation failed — the sources above are the assembled context"})
+		return
+	}
+	if err != nil {
+		log.Printf("api: ask stream ended early: %v", err)
+	}
+	send("done", map[string]any{"answer": answer, "generated": true, "truncated": err != nil})
 }
 
 func atoiDefault(s string, def int) int {

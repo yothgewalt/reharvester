@@ -11,6 +11,41 @@ and every intermediate artefact is a file you can open.
 ## Quick start
 
 ```bash
+npm install -g reharvester
+reharvester
+```
+
+That is the whole install. The package ships one self-contained binary per platform with
+the web interface compiled in, so it needs no Go toolchain, no Node runtime at run time,
+and no build step. `reharvester` with no arguments opens a terminal menu covering the
+whole workflow — harvest, build, serve, console, projects, models, reset — and checks the
+machine on launch, offering to install anything missing.
+
+Everything the menu does is also a subcommand, so it scripts:
+
+```bash
+reharvester harvest --project dev --categories cs.IR,cs.DL --from 2019 --to 2026 --max 1600
+reharvester build   --project dev
+reharvester serve   --project dev      # API and UI together on :8000
+reharvester doctor                     # exits non-zero when something is missing
+```
+
+Optional, for the top rung of the ladder and for wiki synthesis:
+
+```bash
+ollama pull all-minilm     # 45 MB, 384-d sentence encoder -> tier T3
+ollama pull llama3.2       # any chat model -> model-written wiki orientation
+```
+
+Neither is required. Without them the system runs at tier T2 and says so. `reharvester
+doctor` will install both for you, showing each command before it runs.
+
+### From source
+
+The flag-driven binary is unchanged and remains the documented path for reproducing the
+paper's measurements:
+
+```bash
 # 1. Harvest a corpus (the only networked step; ~3 s per 200 records by politeness)
 go run ./cmd/harvester-server --harvest --project dev \
     --categories cs.IR,cs.DL --from 2019 --to 2026 --max 1600
@@ -22,14 +57,34 @@ go run ./cmd/harvester-server --build --project dev
 ./dev.sh                                            # :8000 and :3000
 ```
 
-Optional, for the top rung of the ladder and for wiki synthesis:
+`dev.sh` runs the Next dev server on :3000 for hot reload. A packaged install has no such
+process: the UI is static files inside the binary, served by the API itself on :8000.
+
+To build the distributable yourself:
 
 ```bash
-ollama pull all-minilm     # 45 MB, 384-d sentence encoder -> tier T3
-ollama pull llama3.2       # any chat model -> model-written wiki orientation
+./scripts/release.sh                   # builds npm/ for five platforms, publishes nothing
 ```
 
-Neither is required. Without them the system runs at tier T2 and says so.
+### Releasing
+
+Releases run from CI, so any machine can cut one:
+
+```bash
+git tag v0.2.0 && git push --tags
+```
+
+`.github/workflows/release.yml` builds the UI, cross-compiles all five platforms, runs the
+test suite, publishes the platform packages before the root package, and then installs the
+result from the registry to prove it works. It needs an `NPM_TOKEN` repository secret
+holding an npm **automation** token — a classic token is refused when 2FA is on.
+
+Publishing by hand from a checkout still works, without provenance:
+
+```bash
+npm login
+./scripts/release.sh --version 0.2.0 --publish
+```
 
 ## The capability ladder
 

@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"runtime"
 	"strings"
@@ -265,6 +266,79 @@ func (o *Ollama) embedBatch(ctx context.Context, texts []string) ([][]float32, e
 		return nil, fmt.Errorf("ollama embed: got %d vectors for %d texts", len(out.Embeddings), len(texts))
 	}
 	return out.Embeddings, nil
+}
+
+// GenerateStream asks the local model for prose and delivers it as it is
+// written, calling onToken for each chunk and returning the whole text.
+//
+// Generation runs at roughly the model's decode rate — tens of milliseconds
+// per token on a laptop CPU — so a few hundred tokens is tens of seconds. That
+// cost is unavoidable, but making the caller wait for all of it is not: the
+// streaming form exists so a reader sees the first words in about a second.
+// Prefer it for anything a person is watching, and keep Generate for callers
+// that only want the finished string.
+//
+// onToken runs on this goroutine, in order, and must not block.
+func (o *Ollama) GenerateStream(ctx context.Context, system, prompt string, onToken func(string)) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"model":  o.ChatModel,
+		"stream": true,
+		"messages": []map[string]string{
+			{"role": "system", "content": system},
+			{"role": "user", "content": prompt},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.BaseURL+"/api/chat", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err := o.HTTP.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ollama chat: %s", res.Status)
+	}
+
+	// The streaming endpoint answers with newline-delimited JSON objects rather
+	// than one document, so decode in a loop until it reports done.
+	var sb strings.Builder
+	dec := json.NewDecoder(res.Body)
+	for {
+		var chunk struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+			Done  bool   `json:"done"`
+			Error string `json:"error"`
+		}
+		if err := dec.Decode(&chunk); err != nil {
+			if err == io.EOF {
+				break
+			}
+			// A partial answer is worth more than nothing: return what arrived
+			// alongside the error and let the caller decide.
+			return sb.String(), err
+		}
+		if chunk.Error != "" {
+			return sb.String(), fmt.Errorf("ollama chat: %s", chunk.Error)
+		}
+		if chunk.Message.Content != "" {
+			sb.WriteString(chunk.Message.Content)
+			if onToken != nil {
+				onToken(chunk.Message.Content)
+			}
+		}
+		if chunk.Done {
+			break
+		}
+	}
+	return sb.String(), nil
 }
 
 // Generate asks the local model for prose. Callers must treat an error as

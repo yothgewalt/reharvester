@@ -17,6 +17,13 @@ import type {
   WsStatus,
 } from "@/types/domain";
 
+export interface AskStreamHandlers {
+  onSources(meta: Omit<AskResponse, "answer">): void;
+  onToken(text: string): void;
+  onDone(answer: string, generated: boolean): void;
+  onError(message: string): void;
+}
+
 import { createHttpTransport } from "./http-transport";
 
 export class ApiError extends Error {
@@ -45,6 +52,13 @@ export interface ApiTransport {
   listCommunities(): Promise<Community[]>;
   listCommunityLinks(): Promise<CommunityLink[]>;
   ask(req: AskRequest): Promise<AskResponse>;
+  /**
+   * Streams an answer: sources land in milliseconds, prose arrives token by
+   * token over the seconds that follow. Never rejects for a generation
+   * failure — that is reported through `onError` so the sources already on
+   * screen survive. Returns when the stream closes.
+   */
+  askStream(req: AskRequest, handlers: AskStreamHandlers, signal?: AbortSignal): Promise<void>;
   listProjects(): Promise<ProjectSummary[]>;
   listJobs(): Promise<SchedulerProfile[]>;
   openCrawlSocket(
