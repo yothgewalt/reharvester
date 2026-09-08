@@ -385,20 +385,26 @@ func TestMenuTitlesShareAColumn(t *testing.T) {
 
 	var cols []int
 	for _, it := range m.menu() {
+		// Match the key and title together, not the bare title: a disabled
+		// entry's reason names other entries — "needs bun — install it from
+		// Doctor" — so searching for "Doctor" alone found it inside that
+		// description, on an earlier row, at a completely different column.
+		needle := it.key + "  " + it.title
 		var found bool
 		for _, line := range strings.Split(rendered, "\n") {
-			i := strings.Index(line, it.title)
+			i := strings.Index(line, needle)
 			if i < 0 {
 				continue
 			}
-			// Rune count, not byte offset: the selection cursor "› " is one
-			// column wider in bytes than in columns.
-			cols = append(cols, utf8.RuneCountInString(line[:i]))
+			// Rune counts, not byte offsets: the selection cursor "› " is
+			// wider in bytes than in columns.
+			cols = append(cols,
+				utf8.RuneCountInString(line[:i])+utf8.RuneCountInString(it.key)+2)
 			found = true
 			break
 		}
 		if !found {
-			t.Fatalf("menu title %q never rendered", it.title)
+			t.Fatalf("menu row %q never rendered", needle)
 		}
 	}
 	for i, got := range cols {
