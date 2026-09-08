@@ -1,0 +1,82 @@
+% Compiles with any TeX distribution: pdflatex/xelatex/lualatex abstract.tex
+% Uses only base packages (geometry, hyperref) — portable, one page.
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage[hidelinks]{hyperref}
+\setlength{\parskip}{0.5em}
+\setlength{\parindent}{0pt}
+
+\title{\vspace{-1.5em}Reharvester: A Local-First System for Interactive
+Research-Literature Discovery}
+\author{Yongyuth Chuankhuntod and Anirach Mingkhwan}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-2em}
+
+\begin{abstract}
+\noindent
+Keeping pace with a fast-growing research literature is increasingly difficult, and
+the cloud services that promise to help are opaque, non-portable, and demand that
+sensitive reading lists leave the user's machine. We present \emph{Reharvester}, a
+local-first system that turns a keyword or abstract query into an interactive map of a
+research field without any external dependency. Reharvester harvests papers, assembles
+them into a navigable knowledge graph, surfaces emerging keyword trends, and exposes the
+underlying corpus through a wiki-linked reader backed by retrieval-augmented generation
+over the graph. The entire pipeline runs on the user's hardware and degrades gracefully
+when compute or models are unavailable, making literature exploration reproducible,
+private, and air-gappable.
+\end{abstract}
+
+\section{Introduction}
+The volume of published research outpaces any individual's capacity to read, and
+existing discovery tools centralize both the data and the reasoning in the cloud. This
+is a poor fit for privacy-sensitive or offline settings, and it hides the ranking and
+retrieval logic from the researcher. Reharvester reframes literature discovery as a
+local, inspectable pipeline: every stage---ingestion, graph construction, trend
+analysis, and question answering---executes on the user's own machine and remains open
+to inspection.
+
+\section{Approach}
+Reharvester couples four stages. \textbf{Ingestion} gates a harvest on a meaningful
+query---at least five keywords or a short abstract---then crawls matching papers while
+streaming progress and a live terminal log to the user. \textbf{Graph construction}
+builds a mutual $k$-nearest-neighbour backbone over TF--IDF cosine similarity, partitions
+it into topical communities with Louvain modularity, and scores every paper by PageRank
+centrality and by a bridge score---the fraction of its edge weight crossing a community
+boundary---which operationalises the structural-hole intuition at document level.
+\textbf{Trend analysis} ranks keywords by the regression slope
+of their frequency over a user-adjustable multi-year window, distinguishing durable
+themes from noise, and presents them beside a coarse-grained field map that aggregates
+the backbone to its communities: one node per community above a size threshold, edges
+for the inter-community links above a count threshold, the largest labelled.
+\textbf{Corpus access} presents the corpus as a three-pane reader:
+the communities form a navigable index, the centre pane renders one paper with its
+metadata and an Obsidian-style \texttt{[[wikilink]]} abstract, and its nearest
+neighbours are listed along the backbone with their cosine similarities, so navigation
+follows semantic adjacency rather than a ranked list. A local language model answers
+questions through retrieval-augmented generation grounded in that graph.
+
+\section{Implementation and Results}
+The system is implemented as a Go harvesting server and a Next.js~16 single-page
+interface using Zustand for client-global state that survives navigation, so crawls and
+selections persist across views. The interface is deliberately plain DOM: an earlier
+WebGL rendering of the whole graph was replaced by the three-pane reader, which removes
+a heavyweight rendering dependency and, more importantly, matches how the corpus is
+actually read---one paper at a time, following the backbone---rather than viewed as a
+whole. The question-answering panel exposes its own context set, labelling each admitted
+document as a retrieval seed or a graph expansion and reporting the word budget it was
+assembled under, so the retrieval decision is auditable rather than hidden behind the
+generated prose. Resilience is built in throughout: health polling with automatic
+recovery, a capability-tier indicator, and an explicit model-unreachable state in which
+the assembled context is still returned and presented as the result. Together these
+choices deliver a private, portable, and responsive tool for exploring a research field
+end to end.
+
+\vspace{1em}
+\noindent\textbf{Keywords:} literature discovery; knowledge graph; local-first;
+retrieval-augmented generation; research-gap analysis; keyword trends.
+
+\end{document}

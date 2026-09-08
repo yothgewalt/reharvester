@@ -10,7 +10,7 @@ export function useEnsureGraphSnapshot(): void {
   const loadGraphSnapshot = useAppStore((s) => s.loadGraphSnapshot);
 
   useEffect(() => {
-    if (nodeCount > 0 || (backendStatus !== "online" && backendStatus !== "mocked")) return;
+    if (nodeCount > 0 || backendStatus !== "online") return;
     const { graphLoading } = useAppStore.getState();
     if (!graphLoading) void loadGraphSnapshot();
   }, [nodeCount, backendStatus, loadGraphSnapshot]);

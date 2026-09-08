@@ -160,7 +160,6 @@ export const createCrawlSlice: StateCreator<AppState, [], [], CrawlSlice> = (set
           set({ wsStatus: s });
           if (s === "closed" && get().isCrawlActive) get().finishCrawl();
         },
-        action,
       );
     } catch (err) {
       get().appendLog(

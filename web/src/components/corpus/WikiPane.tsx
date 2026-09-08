@@ -1,7 +1,6 @@
 "use client";
 import Alert from "@mui/material/Alert";
 import Typography from "@mui/material/Typography";
-import { useRouter } from "next/navigation";
 import { useMemo } from "react";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -35,13 +34,12 @@ const remarkPlugins: Options["remarkPlugins"] = [
 const rehypePlugins: Options["rehypePlugins"] = [rehypeRaw];
 
 
-export function WikiPane() {
+export function WikiPane({ markdown }: { markdown?: string } = {}) {
   const wikiDoc = useAppStore((s) => s.wikiDoc);
   const wikiLoading = useAppStore((s) => s.wikiLoading);
   const wikiError = useAppStore((s) => s.wikiError);
   const nodes = useAppStore((s) => s.nodes);
   const selectNode = useAppStore((s) => s.selectNode);
-  const router = useRouter();
 
   const nodeIds = useMemo(() => new Set(nodes.map((n) => n.id)), [nodes]);
 
@@ -59,10 +57,7 @@ export function WikiPane() {
                 href={href}
                 onClick={(e) => {
                   e.preventDefault();
-                  selectNode(nodeId, nodeId, "external");
-
-
-                  router.push("/graph");
+                  selectNode(nodeId, nodeId);
                 }}
               >
                 {children}
@@ -85,7 +80,7 @@ export function WikiPane() {
         );
       },
     }),
-    [nodeIds, selectNode, router],
+    [nodeIds, selectNode],
   );
 
   if (wikiLoading) {
@@ -119,7 +114,7 @@ export function WikiPane() {
         rehypePlugins={rehypePlugins}
         components={components}
       >
-        {wikiDoc.markdown}
+        {markdown ?? wikiDoc.markdown}
       </ReactMarkdown>
     </article>
   );

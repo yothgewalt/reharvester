@@ -1,17 +1,17 @@
-import { createMockTransport } from "@/mocks/mock-transport";
-import { USE_MOCKS } from "@/lib/config";
 import type {
+  AskRequest,
+  AskResponse,
+  Community,
+  CommunityLink,
   CrawlStreamEvent,
-  GapPositionsResponse,
-  GraphKind,
+  GapReport,
   GraphSnapshot,
   HarvestInitRequest,
   HarvestInitResponse,
-  HealthStatus,
   JobRegisterRequest,
-  ProjectAction,
   ProjectActionRequest,
   ProjectActionResponse,
+  ProjectSummary,
   SchedulerProfile,
   TrendKeyword,
   WsStatus,
@@ -35,20 +35,23 @@ export interface CrawlSocketHandle {
 }
 
 export interface ApiTransport {
-  health(): Promise<HealthStatus>;
   harvestInit(req: HarvestInitRequest): Promise<HarvestInitResponse>;
   applyProjectAction(req: ProjectActionRequest): Promise<ProjectActionResponse>;
   registerJob(req: JobRegisterRequest): Promise<SchedulerProfile>;
-  getGraphSnapshot(kind: GraphKind): Promise<GraphSnapshot>;
+  getGraphSnapshot(): Promise<GraphSnapshot>;
   getWikiRaw(docId: string): Promise<string>;
   recalculateTrends(window: [number, number]): Promise<TrendKeyword[]>;
-  getGapPositions(): Promise<GapPositionsResponse>;
+  listGapPairs(): Promise<GapReport>;
+  listCommunities(): Promise<Community[]>;
+  listCommunityLinks(): Promise<CommunityLink[]>;
+  ask(req: AskRequest): Promise<AskResponse>;
+  listProjects(): Promise<ProjectSummary[]>;
+  listJobs(): Promise<SchedulerProfile[]>;
   openCrawlSocket(
     taskId: string,
     onEvent: (e: CrawlStreamEvent) => void,
     onStatus: (s: WsStatus) => void,
-    action?: ProjectAction,
   ): CrawlSocketHandle;
 }
 
-export const transport: ApiTransport = USE_MOCKS ? createMockTransport() : createHttpTransport();
+export const transport: ApiTransport = createHttpTransport();

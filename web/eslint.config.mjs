@@ -9,6 +9,8 @@ const eslintConfig = defineConfig([
   globalIgnores([
 
     ".next/**",
+    // next.config.ts sets distDir: "dist" — build output, not source.
+    "dist/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
