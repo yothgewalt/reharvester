@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"syscall"
 	"time"
 
 	"github.com/yothgewalt/reharvester/internal/analyze"
@@ -440,7 +439,11 @@ func runScaling(dataDir, projectID string, total int) map[string]any {
 			continue
 		}
 		rows = append(rows, row)
-		log.Printf("eval: n=%d total %.2fs, RSS %.0f MB", row.Papers, row.TotalS, row.RSSMB)
+		rss := "n/a"
+		if row.RSSMB > 0 {
+			rss = fmt.Sprintf("%.0f MB", row.RSSMB)
+		}
+		log.Printf("eval: n=%d total %.2fs, RSS %s", row.Papers, row.TotalS, rss)
 	}
 	if len(rows) < 2 {
 		return map[string]any{"rows": rows}
@@ -559,23 +562,13 @@ func runScalingOne(sp *store.Project, n int) {
 	runtime.KeepAlive(an)
 
 	row.TotalS = time.Since(total).Seconds()
-	row.RSSMB = peakRSSMB()
+	// A zero RSS means "not measured on this platform", which LogLogSlope
+	// already skips rather than fitting through.
+	row.RSSMB, _ = peakRSSMB()
 	runtime.KeepAlive(g)
 
 	b, _ := json.Marshal(row)
 	os.Stdout.Write(b)
-}
-
-func peakRSSMB() float64 {
-	var ru syscall.Rusage
-	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
-		return 0
-	}
-	// Darwin reports ru_maxrss in bytes; Linux in kilobytes.
-	if runtime.GOOS == "darwin" {
-		return float64(ru.Maxrss) / (1 << 20)
-	}
-	return float64(ru.Maxrss) / 1024
 }
 
 func ranked(hits []index.Hit) eval.Ranked {

@@ -20,6 +20,7 @@ const PLATFORMS = {
   "linux-arm64": "reharvester-linux-arm64",
   "linux-x64": "reharvester-linux-x64",
   "win32-x64": "reharvester-win32-x64",
+  "win32-arm64": "reharvester-win32-arm64",
 };
 
 function resolveBinary() {

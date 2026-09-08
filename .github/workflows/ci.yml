@@ -21,11 +21,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Scoped to the packages we own: a bare ./... also compiles
+      # web/node_modules/flatted, a Go file that ships inside an npm
+      # dependency and could break this build on a `bun install`.
       - name: Build
-        run: go build ./...
+        run: go build ./cmd/... ./internal/...
 
       - name: Vet
-        run: go vet ./...
+        run: go vet ./cmd/... ./internal/...
 
       - name: Gofmt
         run: |
@@ -37,7 +40,23 @@ jobs:
           fi
 
       - name: Test
-        run: go test ./...
+        run: go test ./cmd/... ./internal/...
+
+      # The check that was missing. Building natively only ever proved the host
+      # platform, so a POSIX-only syscall reached a Windows user's editor
+      # before any gate saw it. Compile-only: go test cannot run a foreign
+      # binary, and compiling is where this class of error surfaces.
+      - name: Cross-compile every release target
+        run: |
+          failed=0
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            echo "==> $target"
+            if ! GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 \
+                 go build ./cmd/... ./internal/...; then
+              failed=1
+            fi
+          done
+          exit $failed
 
       - name: Test with the race detector
         run: go test -race ./internal/httpapi/... ./internal/rag/... ./cmd/reharvester/...

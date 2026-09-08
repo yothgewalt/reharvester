@@ -39,6 +39,7 @@ PLATFORMS=(
   "linux-arm64  linux  arm64"
   "linux-x64    linux  amd64"
   "win32-x64    windows amd64"
+  "win32-arm64  windows arm64"
 )
 
 say() { printf '\033[36m==>\033[0m %s\n' "$1"; }
@@ -129,7 +130,7 @@ NODE
 say "artifacts"
 for entry in "${PLATFORMS[@]}"; do
   read -r suffix _ _ <<<"$entry"
-  exe="reharvester"; [ "$suffix" = "win32-x64" ] && exe="reharvester.exe"
+  exe="reharvester"; case "$suffix" in win32-*) exe="reharvester.exe" ;; esac
   ls -lh "npm/reharvester-$suffix/bin/$exe" | awk '{printf "    %-10s %s\n", $5, $9}'
 done
 

@@ -63,8 +63,13 @@ process: the UI is static files inside the binary, served by the API itself on :
 To build the distributable yourself:
 
 ```bash
-./scripts/release.sh                   # builds npm/ for five platforms, publishes nothing
+./scripts/release.sh                   # builds npm/ for six platforms, publishes nothing
 ```
+
+Supported targets: macOS (arm64, x64), Linux (x64, arm64) and Windows (x64, arm64).
+Go commands are scoped to `./cmd/... ./internal/...` rather than `./...`, because a bare
+`./...` also compiles a Go file that ships inside an npm dependency under
+`web/node_modules`.
 
 ### Releasing
 

@@ -36,6 +36,7 @@
     "reharvester-darwin-x64": "0.1.0",
     "reharvester-linux-arm64": "0.1.0",
     "reharvester-linux-x64": "0.1.0",
+    "reharvester-win32-arm64": "0.1.0",
     "reharvester-win32-x64": "0.1.0"
   }
 }

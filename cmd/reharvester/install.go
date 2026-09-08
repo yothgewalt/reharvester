@@ -180,9 +180,17 @@ func depGit() *Dep {
 // tea.ExecProcess, which hands over the real terminal — required for a sudo
 // password prompt, and it also gives package managers a TTY so their progress
 // output behaves.
+//
+// A Shell step runs through the platform's own interpreter: no Windows plan
+// uses one today, since winget and scoop take argument vectors, but routing it
+// to `sh` there would fail in a way that reads as a broken installer rather
+// than a missing shell.
 func (s Step) Command() *exec.Cmd {
 	switch {
 	case s.Shell != "":
+		if runtime.GOOS == "windows" {
+			return exec.Command("cmd", "/c", s.Shell)
+		}
 		return exec.Command("sh", "-c", s.Shell)
 	case s.NeedsSudo:
 		return exec.Command("sudo", s.Cmd...)
