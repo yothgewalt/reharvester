@@ -76,7 +76,7 @@ func newProjectList(st *store.Store, active string) listModel {
 		eyebrow: "PROJECTS",
 		title:   "Corpora on disk",
 		empty:   "No projects yet — run Harvest to create one.",
-		help:    "↑↓ move · enter make active · esc back",
+		help:    "↑↓ move · enter make active · a analyse · x clean · esc back",
 	}
 	metas, err := st.Projects()
 	if err != nil {
@@ -110,6 +110,15 @@ func newProjectList(st *store.Store, active string) listModel {
 }
 
 func (m *rootModel) updateProjects(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// The row under the cursor is what these act on, so the user does not have
+	// to make a project active just to inspect or clear it.
+	selected := func() (string, bool) {
+		if len(m.projects.rows) == 0 {
+			return "", false
+		}
+		return m.projects.rows[m.projects.idx].id, true
+	}
+
 	switch k.String() {
 	case "esc", "q":
 		m.screen = screenMenu
@@ -117,11 +126,28 @@ func (m *rootModel) updateProjects(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.projects.move(-1)
 	case "down", "j":
 		m.projects.move(1)
-	case "enter":
-		if len(m.projects.rows) == 0 {
+	case "a":
+		id, ok := selected()
+		if !ok {
 			return m, nil
 		}
-		id := m.projects.rows[m.projects.idx].id
+		return m, m.startJob("analyse", func(context.Context) error {
+			return app.Analyze(m.store, id)
+		})
+	case "x":
+		id, ok := selected()
+		if !ok {
+			return m, nil
+		}
+		scoped := m.settings
+		scoped.Project = id
+		m.clean = newCleanModel(m.store, scoped)
+		m.screen = screenClean
+	case "enter":
+		id, ok := selected()
+		if !ok {
+			return m, nil
+		}
 		m.settings.Project = id
 		_ = m.settings.Save()
 		m.projects = newProjectList(m.store, id)
@@ -169,7 +195,7 @@ func newModelList(s Settings) listModel {
 	l := listModel{
 		eyebrow: "MODELS",
 		title:   "Ollama at " + s.OllamaURL,
-		help:    "↑↓ move · enter install or pull · esc back",
+		help:    "↑↓ move · enter install or pull · r refresh · esc back to Doctor",
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -236,7 +262,7 @@ func newModelList(s Settings) listModel {
 func (m *rootModel) updateModels(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "esc", "q":
-		m.screen = screenMenu
+		m.screen = screenDoctor
 	case "up", "k":
 		m.models.move(-1)
 	case "down", "j":

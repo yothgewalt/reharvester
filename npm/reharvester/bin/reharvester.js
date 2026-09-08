@@ -4,47 +4,46 @@
 /**
  * Launcher for the platform binary.
  *
- * The real program is a Go executable shipped in one of the optional
- * per-platform packages; npm installs only the one matching this machine's
- * os/cpu. This shim finds it and hands over.
+ * The real program is a Go executable. This package ships one per supported
+ * platform under bin/<platform>-<arch>/, and this shim picks the matching one
+ * and hands over.
  *
  * stdio is inherited rather than piped: reharvester is a full-screen terminal
  * UI, and it needs the real TTY for input, resize events and colour detection.
  */
 
 const { spawnSync } = require("node:child_process");
+const { existsSync } = require("node:fs");
+const path = require("node:path");
 
-const PLATFORMS = {
-  "darwin-arm64": "reharvester-darwin-arm64",
-  "darwin-x64": "reharvester-darwin-x64",
-  "linux-arm64": "reharvester-linux-arm64",
-  "linux-x64": "reharvester-linux-x64",
-  "win32-x64": "reharvester-win32-x64",
-  "win32-arm64": "reharvester-win32-arm64",
-};
+const SUPPORTED = [
+  "darwin-arm64",
+  "darwin-x64",
+  "linux-arm64",
+  "linux-x64",
+  "win32-arm64",
+  "win32-x64",
+];
 
 function resolveBinary() {
   const key = `${process.platform}-${process.arch}`;
-  const pkg = PLATFORMS[key];
-  if (!pkg) {
+  if (!SUPPORTED.includes(key)) {
     fail(
       `No reharvester build for ${key}.`,
-      "Supported: " + Object.keys(PLATFORMS).join(", "),
+      `Supported: ${SUPPORTED.join(", ")}`,
       "Build from source instead: https://github.com/yothgewalt/reharvester"
     );
   }
   const exe = process.platform === "win32" ? "reharvester.exe" : "reharvester";
-  try {
-    return require.resolve(`${pkg}/bin/${exe}`);
-  } catch {
+  const binary = path.join(__dirname, key, exe);
+  if (!existsSync(binary)) {
     fail(
-      `The ${pkg} package is not installed.`,
-      "npm skips optional dependencies when installed with --no-optional,",
-      "and some lockfiles omit them. Reinstall with:",
-      "",
-      "  npm install -g reharvester --force"
+      `The ${key} binary is missing from this install.`,
+      `Expected it at: ${binary}`,
+      "Reinstall with: npm install -g reharvester --force"
     );
   }
+  return binary;
 }
 
 function fail(...lines) {

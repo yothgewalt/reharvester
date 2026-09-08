@@ -63,10 +63,14 @@ process: the UI is static files inside the binary, served by the API itself on :
 To build the distributable yourself:
 
 ```bash
-./scripts/release.sh                   # builds npm/ for six platforms, publishes nothing
+./scripts/release.sh                   # builds npm/reharvester, publishes nothing
 ```
 
-Supported targets: macOS (arm64, x64), Linux (x64, arm64) and Windows (x64, arm64).
+Supported targets: macOS (arm64, x64), Linux (x64, arm64) and Windows (x64, arm64). All
+six binaries ship in the single `reharvester` package — about 29 MB to download and 67 MB
+installed, of which one binary is ever used. Splitting them into per-platform packages
+selected by `optionalDependencies` would cut that to 4.7 MB, at the cost of seven package
+names and a publish that can half-succeed and burn a version.
 Go commands are scoped to `./cmd/... ./internal/...` rather than `./...`, because a bare
 `./...` also compiles a Go file that ships inside an npm dependency under
 `web/node_modules`.
@@ -79,10 +83,20 @@ Releases run from CI, so any machine can cut one:
 git tag v0.2.0 && git push --tags
 ```
 
-`.github/workflows/release.yml` builds the UI, cross-compiles all five platforms, runs the
-test suite, publishes the platform packages before the root package, and then installs the
-result from the registry to prove it works. It needs an `NPM_TOKEN` repository secret
-holding an npm **automation** token — a classic token is refused when 2FA is on.
+`.github/workflows/release.yml` builds the UI, cross-compiles all six platforms, runs the
+test suite, publishes the single package, and then installs the result from the registry to
+prove it works.
+
+**Authentication.** CI cannot answer a two-factor prompt, so the npm account must not
+require one for writes: set Two-Factor Authentication to *Authorization only* under account
+settings, and put a granular access token with read/write on all packages into the
+`NPM_TOKEN` repository secret. A token alone is not enough — an account set to
+*Authorization and writes* returns `EOTP` no matter how the token is configured.
+
+Better, once the packages exist: configure Trusted Publishing on npmjs.com against this
+repository and `release.yml`. CI then publishes over OIDC with no token at all, and the
+`NPM_TOKEN` secret can be deleted. The workflow already grants `id-token: write` for
+provenance, so nothing needs to change here.
 
 Publishing by hand from a checkout still works, without provenance:
 

@@ -71,59 +71,40 @@ cp -R web/dist internal/webui/dist
 printf '# Placeholder so the go:embed directive in webui.go compiles from a clean\n# checkout. The release script overwrites this directory with web/dist.\n' \
   > internal/webui/dist/.gitkeep
 
-# 3. Cross-compile. CGO off keeps the Linux binaries portable across libc
-#    versions; -trimpath keeps build paths out of the artifact.
+# 3. Cross-compile every target into the one package. CGO off keeps the Linux
+#    binaries portable across libc versions; -trimpath keeps build paths out of
+#    the artifact.
+#
+#    All six ship together: one npm package rather than a launcher plus six
+#    platform packages, which costs about 29 MB of download for roughly 4.7 MB
+#    of usable binary, and buys a single publish with no ordering rule and no
+#    way to half-publish a version.
 LDFLAGS="-s -w -X github.com/yothgewalt/reharvester/internal/app.Version=$VERSION"
+BINROOT="npm/reharvester/bin"
 
 for entry in "${PLATFORMS[@]}"; do
   read -r suffix goos goarch <<<"$entry"
-  pkg="npm/reharvester-$suffix"
   exe="reharvester"
   [ "$goos" = "windows" ] && exe="reharvester.exe"
 
   say "building $suffix"
-  rm -rf "$pkg"
-  mkdir -p "$pkg/bin"
+  rm -rf "${BINROOT:?}/$suffix"
+  mkdir -p "$BINROOT/$suffix"
   CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-    go build -trimpath -ldflags "$LDFLAGS" -o "$pkg/bin/$exe" ./cmd/reharvester
-
-  node - "$pkg" "$suffix" "$goos" "$goarch" "$VERSION" "$exe" <<'NODE'
-const fs = require("node:fs");
-const [pkg, suffix, goos, goarch, version, exe] = process.argv.slice(2);
-const os = { darwin: "darwin", linux: "linux", windows: "win32" }[goos];
-const cpu = { amd64: "x64", arm64: "arm64" }[goarch];
-fs.writeFileSync(`${pkg}/package.json`, JSON.stringify({
-  name: `reharvester-${suffix}`,
-  version,
-  description: `reharvester binary for ${os}-${cpu}`,
-  license: "MIT",
-  repository: { type: "git", url: "git+https://github.com/yothgewalt/reharvester.git" },
-  os: [os],
-  cpu: [cpu],
-  files: [`bin/${exe}`],
-  preferUnplugged: true,
-}, null, 2) + "\n");
-NODE
-
-  printf 'Platform binary for reharvester. Install the `reharvester` package instead.\n' > "$pkg/README.md"
-  # npm packs from the package directory, so each one needs its own copy of the
-  # licence its package.json declares.
-  cp LICENSE "$pkg/LICENSE"
+    go build -trimpath -ldflags "$LDFLAGS" -o "$BINROOT/$suffix/$exe" ./cmd/reharvester
 done
 
+# npm packs from the package directory, so it needs its own copy of the licence
+# its package.json declares.
 cp LICENSE npm/reharvester/LICENSE
 
-# 4. Sync the root package version and its optional dependency pins.
-say "syncing root package to $VERSION"
+# 4. Sync the package version.
+say "setting version to $VERSION"
 node - "$VERSION" <<'NODE'
 const fs = require("node:fs");
-const version = process.argv[2];
 const p = "npm/reharvester/package.json";
 const pkg = JSON.parse(fs.readFileSync(p, "utf8"));
-pkg.version = version;
-for (const dep of Object.keys(pkg.optionalDependencies || {})) {
-  pkg.optionalDependencies[dep] = version;
-}
+pkg.version = process.argv[2];
 fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + "\n");
 NODE
 
@@ -131,8 +112,9 @@ say "artifacts"
 for entry in "${PLATFORMS[@]}"; do
   read -r suffix _ _ <<<"$entry"
   exe="reharvester"; case "$suffix" in win32-*) exe="reharvester.exe" ;; esac
-  ls -lh "npm/reharvester-$suffix/bin/$exe" | awk '{printf "    %-10s %s\n", $5, $9}'
+  ls -lh "$BINROOT/$suffix/$exe" | awk '{printf "    %-10s %s\n", $5, $9}'
 done
+printf '    %-10s %s\n' "$(du -sh npm/reharvester | cut -f1)" "npm/reharvester (uncompressed)"
 
 if [ "$PUBLISH" -eq 0 ]; then
   cat <<EOF
@@ -147,19 +129,37 @@ EOF
   exit 0
 fi
 
-# 5. Publish platform packages first. The root package's optionalDependencies
-#    resolve at install time, so publishing it before its platforms exist
-#    produces installs with no binary.
+# 5. Check authentication before uploading anything.
+#
+# npm refuses to reuse a version even after an unpublish, so a failure partway
+# through the loop burns the version: some packages exist at it and the rest
+# never will. Catching a bad token here costs one request and keeps the version
+# reusable. It cannot detect a token that authenticates but is barred from
+# publishing by a 2FA policy — that only surfaces on the first PUT — which is
+# what the recovery message below is for.
+say "checking npm authentication"
+if ! npm_user=$(npm whoami 2>&1); then
+  cat >&2 <<EOF
+npm is not authenticated: $npm_user
+
+In CI, set the NPM_TOKEN secret to a granular access token with read/write on
+all packages and two-factor bypass enabled. Locally, run: npm login
+EOF
+  exit 1
+fi
+say "authenticated as $npm_user"
+
+# 6. Publish. One package means no ordering rule and no partial state: the
+#    release either lands whole or leaves the version free to reuse.
 PUBLISH_FLAGS=(--access public)
 [ "$PROVENANCE" -eq 1 ] && PUBLISH_FLAGS+=(--provenance)
 
-for entry in "${PLATFORMS[@]}"; do
-  read -r suffix _ _ <<<"$entry"
-  say "publishing reharvester-$suffix"
-  ( cd "npm/reharvester-$suffix" && npm publish "${PUBLISH_FLAGS[@]}" )
-done
-
-say "publishing reharvester"
-( cd npm/reharvester && npm publish "${PUBLISH_FLAGS[@]}" )
+say "publishing reharvester@$VERSION"
+if ! ( cd npm/reharvester && npm publish "${PUBLISH_FLAGS[@]}" ); then
+  echo >&2
+  echo "Publish failed. Nothing reached the registry, so version $VERSION is" >&2
+  echo "still free — fix the cause and run this again." >&2
+  exit 1
+fi
 
 say "published $VERSION"

@@ -41,7 +41,7 @@ func (m *rootModel) startJob(name string, run func(context.Context) error) tea.C
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m.job, m.jobCancel = name, cancel
+	m.job, m.jobCancel, m.jobCancelled = name, cancel, false
 	m.jobStart, m.jobPct, m.jobStage = time.Now(), 0, "starting"
 	m.screen = screenProgress
 	m.sink.Push("── " + name + " started ──")

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,8 +11,10 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+	"github.com/yothgewalt/reharvester/internal/store"
 )
 
 // newTestModel builds a model against a throwaway data directory. The TUI
@@ -104,10 +107,8 @@ func TestMenuExplainsWhyDisabled(t *testing.T) {
 	for _, it := range m.menu() {
 		byKey[it.key] = it
 	}
-	for _, key := range []string{"b", "a"} {
-		if byKey[key].why == "" {
-			t.Errorf("%q should be disabled with no corpus", byKey[key].title)
-		}
+	if byKey["b"].why == "" {
+		t.Error("Build should be disabled with no corpus")
 	}
 	// Selecting it must report the reason rather than starting a job.
 	m.screen = screenMenu
@@ -579,4 +580,164 @@ func TestDoctorSummaryReportsState(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestMenuHidesSourceBuildOutsideACheckout: a packaged install has no source
+// tree, so the entry would sit permanently disabled — noise on every launch for
+// something that cannot run there.
+func TestMenuHidesSourceBuildOutsideACheckout(t *testing.T) {
+	m := newTestModel(t)
+
+	m.inCheckout = true
+	if !hasKey(m.menu(), "r") {
+		t.Error("Build from source should appear inside a checkout")
+	}
+
+	m.inCheckout = false
+	if hasKey(m.menu(), "r") {
+		t.Error("Build from source should be absent outside a checkout")
+	}
+}
+
+// TestMenuStaysShort guards the collapse: screens that act on a corpus live
+// under Projects and model management lives under Doctor, so they must not
+// creep back onto the front page.
+func TestMenuStaysShort(t *testing.T) {
+	m := newTestModel(t)
+	m.inCheckout = false
+
+	items := m.menu()
+	if len(items) > 8 {
+		var titles []string
+		for _, it := range items {
+			titles = append(titles, it.title)
+		}
+		t.Errorf("menu has %d entries, want at most 8: %v", len(items), titles)
+	}
+	for _, gone := range []string{"m", "a", "x"} {
+		if hasKey(items, gone) {
+			t.Errorf("key %q is back on the front page; it belongs under Projects or Doctor", gone)
+		}
+	}
+	for _, want := range []string{"s", "c", "h", "b", "p", "d", "t", "q"} {
+		if !hasKey(items, want) {
+			t.Errorf("key %q missing from the menu", want)
+		}
+	}
+}
+
+// TestCancelledJobIsNotReportedAsFailed: cancelling kills the child process,
+// which surfaces as "signal: killed". Reporting that as a failure reads like a
+// crash the user caused by asking the job to stop.
+func TestCancelledJobIsNotReportedAsFailed(t *testing.T) {
+	m := newTestModel(t)
+	m.job = "source build"
+	m.jobCancelled = true
+
+	next, _ := m.Update(jobDoneMsg{name: "source build", err: errors.New("signal: killed")})
+	rm := next.(*rootModel)
+
+	if strings.Contains(rm.status, "failed") {
+		t.Errorf("status = %q, want it to read as a cancellation", rm.status)
+	}
+	if !strings.Contains(rm.status, "cancelled") {
+		t.Errorf("status = %q, want it to say cancelled", rm.status)
+	}
+	if rm.err != nil {
+		t.Errorf("err = %v, want nil — the user asked for this", rm.err)
+	}
+	if rm.jobCancelled {
+		t.Error("the cancellation flag must not leak into the next job")
+	}
+}
+
+// TestGenuineFailureStillReportsAsFailed is the other half: without a
+// cancellation, an error is still an error.
+func TestGenuineFailureStillReportsAsFailed(t *testing.T) {
+	m := newTestModel(t)
+	m.job = "build"
+
+	next, _ := m.Update(jobDoneMsg{name: "build", err: errors.New("no such file")})
+	rm := next.(*rootModel)
+
+	if !strings.Contains(rm.status, "failed") {
+		t.Errorf("status = %q, want a failure", rm.status)
+	}
+	if rm.err == nil {
+		t.Error("err should be set for a real failure")
+	}
+}
+
+func hasKey(items []menuItem, key string) bool {
+	for _, it := range items {
+		if it.key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCollapsedNavigation pins where the moved screens now live, and that esc
+// returns to the screen that opened them rather than jumping to the menu.
+func TestCollapsedNavigation(t *testing.T) {
+	key := func(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+	esc := tea.KeyMsg{Type: tea.KeyEsc}
+
+	t.Run("doctor opens models", func(t *testing.T) {
+		m := newTestModel(t)
+		m.screen = screenDoctor
+		next, _ := m.updateDoctor(key("m"))
+		rm := next.(*rootModel)
+		if rm.screen != screenModels {
+			t.Fatalf("screen = %v, want models", rm.screen)
+		}
+		next, _ = rm.updateModels(esc)
+		if got := next.(*rootModel).screen; got != screenDoctor {
+			t.Errorf("esc from models went to %v, want back to doctor", got)
+		}
+	})
+
+	t.Run("projects opens clean, scoped to the highlighted row", func(t *testing.T) {
+		m := newTestModel(t)
+		// Two projects so "the selected one" is distinguishable from "the
+		// active one" — the whole point of scoping to the cursor.
+		for _, id := range []string{"alpha", "beta"} {
+			proj, err := m.store.Project(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(proj.Path("papers.jsonl"), []byte("{}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			meta := store.Meta{ID: id, Name: id, Status: "complete", DocsIngested: 1, CreatedAt: time.Now().UTC()}
+			if err := proj.SaveJSON("meta.json", &meta); err != nil {
+				t.Fatal(err)
+			}
+		}
+		m.projects = newProjectList(m.store, m.settings.Project)
+		if len(m.projects.rows) < 2 {
+			t.Fatalf("expected two projects, got %d", len(m.projects.rows))
+		}
+		m.projects.idx = 1
+		want := m.projects.rows[1].id
+
+		m.screen = screenProjects
+		next, _ := m.updateProjects(key("x"))
+		rm := next.(*rootModel)
+		if rm.screen != screenClean {
+			t.Fatalf("screen = %v, want clean", rm.screen)
+		}
+		if !strings.Contains(rm.clean.actions[2].title, want) {
+			t.Errorf("clean screen targets %q, want the highlighted project %q",
+				rm.clean.actions[2].title, want)
+		}
+		if m.settings.Project == want {
+			t.Error("cleaning must not silently change the active project")
+		}
+
+		next, _ = rm.updateClean(esc)
+		if got := next.(*rootModel).screen; got != screenProjects {
+			t.Errorf("esc from clean went to %v, want back to projects", got)
+		}
+	})
 }

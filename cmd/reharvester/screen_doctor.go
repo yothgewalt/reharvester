@@ -26,6 +26,9 @@ func (m *rootModel) updateDoctor(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.checkIdx < len(m.checks) {
 			return m.beginInstall(m.checks[m.checkIdx])
 		}
+	case "m":
+		m.models = newModelList(m.settings)
+		m.screen = screenModels
 	case "esc", "q", "s":
 		m.screen = screenMenu
 	}
@@ -69,7 +72,7 @@ func (m *rootModel) viewDoctor() string {
 			"This build has no web UI embedded — the API runs without one.\n"+
 				"\"Build from source\" compiles it in."))
 	}
-	b.WriteString(helpLine("↑↓ move · i install the selected item · r re-check · esc menu"))
+	b.WriteString(helpLine("↑↓ move · i install the selected item · m models · r re-check · esc menu"))
 	return b.String()
 }
 

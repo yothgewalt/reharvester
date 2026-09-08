@@ -106,7 +106,7 @@ func (m *rootModel) updateClean(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch k.String() {
 	case "esc", "q":
-		m.screen = screenMenu
+		m.screen = screenProjects
 	case "up", "k":
 		if c.idx > 0 {
 			c.idx--
@@ -224,7 +224,7 @@ func (m *rootModel) viewClean() string {
 	if c.result != "" {
 		b.WriteString("\n" + styleMuted.Render(c.result))
 	}
-	b.WriteString(helpLine("↑↓ move · enter run the selected action · esc back"))
+	b.WriteString(helpLine("↑↓ move · enter run the selected action · esc back to Projects"))
 	return b.String()
 }
 

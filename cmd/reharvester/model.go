@@ -48,6 +48,13 @@ type rootModel struct {
 	checking   bool
 	firstCheck bool
 
+	// Toolchain state, cached. menu() runs on every frame, and probing these
+	// there spawned `go version` and `bun --version` on every keystroke.
+	// Refreshed whenever the checks re-run, which is after every install.
+	goOK       bool
+	bunOK      bool
+	inCheckout bool
+
 	menuIdx int
 
 	console      consoleModel
@@ -60,12 +67,15 @@ type rootModel struct {
 
 	// One job at a time: harvest, build and analyse all write the same project
 	// directory, so overlapping them would corrupt it.
-	job        string
-	jobCancel  context.CancelFunc
-	jobStart   time.Time
-	jobPct     int
-	jobStage   string
-	progressCh chan progressMsg
+	job       string
+	jobCancel context.CancelFunc
+	// jobCancelled records that the user stopped the job, so its error is
+	// reported as a cancellation rather than a failure.
+	jobCancelled bool
+	jobStart     time.Time
+	jobPct       int
+	jobStage     string
+	progressCh   chan progressMsg
 
 	serverOn     bool
 	serverCancel context.CancelFunc
@@ -116,7 +126,17 @@ func newRootModel(dataDir string) (*rootModel, error) {
 		progressCh: make(chan progressMsg, 64),
 	}
 	m.console = newConsole(sink)
+	m.refreshTooling()
 	return m, nil
+}
+
+// refreshTooling re-probes the toolchain. Called at startup and after every
+// check pass, never from a render path.
+func (m *rootModel) refreshTooling() {
+	m.goOK, _ = detectGo()
+	m.bunOK, _ = detectVersion("bun", "--version")
+	_, err := repoRoot()
+	m.inCheckout = err == nil
 }
 
 func (m *rootModel) Init() tea.Cmd {
@@ -159,6 +179,7 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case checksMsg:
 		m.checks, m.checking = msg, false
+		m.refreshTooling()
 		if m.checkIdx >= len(m.checks) {
 			m.checkIdx = 0
 		}
@@ -176,11 +197,20 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case jobDoneMsg:
-		m.job, m.jobCancel = "", nil
-		if msg.err != nil {
+		cancelled := m.jobCancelled
+		m.job, m.jobCancel, m.jobCancelled = "", nil, false
+		switch {
+		case cancelled:
+			// Cancelling kills the child, which surfaces as "signal: killed".
+			// Reporting that as a failure reads like a crash the user caused
+			// by asking the job to stop.
+			m.err = nil
+			m.status = msg.name + " cancelled after " + shortDur(time.Since(m.jobStart))
+		case msg.err != nil:
 			m.err = msg.err
 			m.status = msg.name + " failed: " + msg.err.Error()
-		} else {
+		default:
+			m.err = nil
 			m.status = fmt.Sprintf("%s finished in %s", msg.name, shortDur(time.Since(m.jobStart)))
 		}
 		return m, m.runChecksCmd()
@@ -219,6 +249,7 @@ func (m *rootModel) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k.Type == tea.KeyCtrlC {
 		switch {
 		case m.job != "" && m.jobCancel != nil:
+			m.jobCancelled = true
 			m.jobCancel()
 			m.status = "cancelling " + m.job + "…"
 			return m, nil
@@ -337,17 +368,6 @@ func (m *rootModel) menu() []menuItem {
 	if m.job != "" {
 		busy = m.job + " is running"
 	}
-	goOK, _ := detectGo()
-	bunOK, _ := detectVersion("bun", "--version")
-	srcWhy := ""
-	switch {
-	case !goOK && !bunOK:
-		srcWhy = "needs Go and bun — install them from Doctor"
-	case !goOK:
-		srcWhy = "needs Go — install it from Doctor"
-	case !bunOK:
-		srcWhy = "needs bun — install it from Doctor"
-	}
 
 	serverTitle := "Start server"
 	serverDesc := "serve the API" + ternary(uiEmbedded(), " and UI", "") + " on " + m.settings.Addr
@@ -356,20 +376,35 @@ func (m *rootModel) menu() []menuItem {
 		serverDesc = "running at " + browseURL(m.settings.Addr)
 	}
 
-	return []menuItem{
+	// Screens that act on a corpus live under Projects, and model management
+	// lives under Doctor, which already reports Ollama and the two models and
+	// can install them. Keeping them on the front page duplicated both.
+	items := []menuItem{
 		{"s", serverTitle, serverDesc, ""},
 		{"c", "Console", "live server, request and job output", ""},
 		{"h", "Harvest", "fetch a corpus from arXiv", busy},
 		{"b", "Build", "indexes, backbone and analytics", firstNonEmpty(busy, noCorpus)},
-		{"p", "Projects", "switch and inspect corpora", ""},
-		{"m", "Models", "Ollama status and model pulls", ""},
-		{"a", "Analyse", "trends and gap candidates", firstNonEmpty(busy, noCorpus)},
-		{"r", "Build from source", "rebuild the UI and binary", srcWhy},
+		{"p", "Projects", "switch, inspect, analyse and clean corpora", ""},
 		{"d", "Doctor", m.doctorSummary(), ""},
 		{"t", "Settings", "data directory, port, models", ""},
-		{"x", "Clean data", "remove artefacts or reset entirely", busy},
-		{"q", "Quit", "", ""},
 	}
+
+	// A packaged install has no source tree, so this entry would be permanently
+	// disabled there — noise on every launch for something that cannot run.
+	if m.inCheckout {
+		srcWhy := ""
+		switch {
+		case !m.goOK && !m.bunOK:
+			srcWhy = "needs Go and bun — install them from Doctor"
+		case !m.goOK:
+			srcWhy = "needs Go — install it from Doctor"
+		case !m.bunOK:
+			srcWhy = "needs bun — install it from Doctor"
+		}
+		items = append(items, menuItem{"r", "Build from source", "rebuild the UI and binary", firstNonEmpty(busy, srcWhy)})
+	}
+
+	return append(items, menuItem{"q", "Quit", "", ""})
 }
 
 func (m *rootModel) updateMenu(k tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -411,16 +446,11 @@ func (m *rootModel) activate(it menuItem) (tea.Model, tea.Cmd) {
 		m.screen = screenHarvest
 	case "b":
 		return m, m.startJob("build", m.runBuild)
-	case "a":
-		return m, m.startJob("analyse", m.runAnalyze)
 	case "r":
 		return m, m.startJob("source build", m.runSourceBuild)
 	case "p":
 		m.projects = newProjectList(m.store, m.settings.Project)
 		m.screen = screenProjects
-	case "m":
-		m.models = newModelList(m.settings)
-		m.screen = screenModels
 	case "d":
 		m.checking = true
 		m.screen = screenDoctor
@@ -428,9 +458,6 @@ func (m *rootModel) activate(it menuItem) (tea.Model, tea.Cmd) {
 	case "t":
 		m.settingsForm = newSettingsForm(m.settings)
 		m.screen = screenSettings
-	case "x":
-		m.clean = newCleanModel(m.store, m.settings)
-		m.screen = screenClean
 	case "q":
 		return m, m.quit()
 	}
