@@ -70,20 +70,25 @@ jobs:
             https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/reharvester)
           status=${response##*$'\n'}
 
-          if [ "$status" != "200" ]; then
-            # The success body carries a live registry token; only the failure
-            # body is safe to print.
-            echo "npm refused the OIDC token exchange (HTTP $status):" >&2
-            echo "${response%$'\n'*}" >&2
-            echo >&2
-            echo "Configure the trusted publisher on npmjs.com before releasing:" >&2
-            echo "open the reharvester package, then Settings, then Trusted" >&2
-            echo "Publisher, and add a GitHub Actions publisher with repository" >&2
-            echo "yothgewalt/reharvester, workflow filename release.yml, and no" >&2
-            echo "environment." >&2
-            exit 1
-          fi
-          echo "npm trusted publishing is configured for reharvester."
+          # A granted exchange answers 201, so match the family rather than one
+          # code. Its body carries a live registry token, which is why nothing
+          # is printed off the failure path.
+          case "$status" in
+            2*)
+              echo "npm trusted publishing is configured for reharvester."
+              exit 0
+              ;;
+          esac
+
+          echo "npm refused the OIDC token exchange (HTTP $status):" >&2
+          echo "${response%$'\n'*}" >&2
+          echo >&2
+          echo "Configure the trusted publisher on npmjs.com before releasing:" >&2
+          echo "open the reharvester package, then Settings, then Trusted" >&2
+          echo "Publisher, and add a GitHub Actions publisher with repository" >&2
+          echo "yothgewalt/reharvester, workflow filename release.yml, and no" >&2
+          echo "environment." >&2
+          exit 1
 
       - name: Resolve the version
         id: version
