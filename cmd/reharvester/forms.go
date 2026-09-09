@@ -51,16 +51,16 @@ func newHarvestForm(s Settings) formModel {
 					s.Project = strings.TrimSpace(v)
 					return nil
 				}),
-			newField("Categories", "comma-separated arXiv categories", s.Categories,
+			newField("Categories", "optional, blank infers them from the keywords", s.Categories,
+				func(s *Settings, v string) error { s.Categories = v; return nil }),
+			newField("Keywords", "each one is queried separately for an equal share", s.Keywords,
 				func(s *Settings, v string) error {
-					if len(SplitTrim(v)) == 0 {
-						return fmt.Errorf("give at least one category")
+					if len(SplitTrim(v)) == 0 && len(SplitTrim(s.Categories)) == 0 {
+						return fmt.Errorf("give at least one keyword, or a category to search")
 					}
-					s.Categories = v
+					s.Keywords = v
 					return nil
 				}),
-			newField("Keywords", "optional, ANDed with the categories", s.Keywords,
-				func(s *Settings, v string) error { s.Keywords = v; return nil }),
 			newField("From year", "earliest submission year", strconv.Itoa(s.From),
 				func(s *Settings, v string) error { return setYear(&s.From, v) }),
 			newField("To year", "latest submission year", strconv.Itoa(s.To),

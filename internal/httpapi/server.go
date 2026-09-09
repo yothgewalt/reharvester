@@ -33,7 +33,6 @@ type Config struct {
 	Embedder     index.Embedder
 	SnapshotSize int
 	HarvestMax   int
-	Categories   []string
 	Delay        time.Duration
 	AllowOrigins []string
 }

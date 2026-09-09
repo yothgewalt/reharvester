@@ -89,8 +89,9 @@ export const createCrawlSlice: StateCreator<AppState, [], [], CrawlSlice> = (set
     });
     get().appendLog(localLog("info", "Submitting harvest request …"));
 
-
-    if (get().nodes.length === 0 && !get().graphLoading) void get().loadGraphSnapshot();
+    // A new harvest builds a new corpus, so nothing carried over from the old
+    // one should stay on screen. The graph_delta frames repopulate it.
+    get().resetCorpusView();
     try {
       const req: { keywords?: string[]; abstract?: string; pdf?: Array<{ name: string; base64: string }> } =
         payload.mode === "keywords"
@@ -199,6 +200,7 @@ export const createCrawlSlice: StateCreator<AppState, [], [], CrawlSlice> = (set
           });
         }
         get().finishCrawl();
+        void get().loadCommunities(true);
         break;
       }
     }

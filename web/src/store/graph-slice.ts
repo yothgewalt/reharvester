@@ -22,7 +22,8 @@ export interface GraphSlice {
   communityLinks: CommunityLink[];
   communitiesLoading: boolean;
   selectedCommunitySlug: string | null;
-  loadCommunities(): Promise<void>;
+  loadCommunities(force?: boolean): Promise<void>;
+  resetCorpusView(): void;
   selectCommunity(slug: string | null): void;
   loadGraphSnapshot(): Promise<void>;
   applyGraphDelta(d: { addedNodes: GraphNode[]; addedEdges: GraphEdge[] }): void;
@@ -90,8 +91,28 @@ export const createGraphSlice: StateCreator<AppState, [], [], GraphSlice> = (set
   communitiesLoading: false,
   selectedCommunitySlug: null,
 
-  loadCommunities: async () => {
-    if (get().communities.length > 0 || get().communitiesLoading) return;
+  // resetCorpusView drops everything derived from the previous corpus: the
+  // community rail, and the node cache that loadGraphSnapshot merges into
+  // rather than replaces. Call it when a harvest finishes, otherwise the UI
+  // keeps showing the old corpus's communities until a full page reload.
+  resetCorpusView: () => {
+    graphCache = null;
+    set({
+      nodes: [],
+      edges: [],
+      communities: [],
+      communityLinks: [],
+      selectedCommunitySlug: null,
+      selectedNodeId: null,
+      selectedDocId: null,
+    });
+  },
+
+  // Pass force after a rebuild: the cached rail belongs to the corpus that was
+  // active when it was fetched, and nothing else invalidates it.
+  loadCommunities: async (force = false) => {
+    if (get().communitiesLoading) return;
+    if (!force && get().communities.length > 0) return;
     set({ communitiesLoading: true });
     try {
       const [communities, communityLinks] = await Promise.all([

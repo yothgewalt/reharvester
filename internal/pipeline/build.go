@@ -73,6 +73,7 @@ func Build(ctx context.Context, sp *store.Project, papers []paper.Paper, emb ind
 	opt.Approximate = approx
 	t = time.Now()
 	p.Graph = graph.Build(p.Corpus.TF, papers, opt)
+	p.Graph.Fingerprint = graph.Fingerprint(papers)
 	p.Timings["graph"] = time.Since(t)
 	rep.Log("info", fmt.Sprintf("Backbone: %d edges, %d communities, %d co-author links in %s",
 		len(p.Graph.Edges), len(p.Graph.Communities), len(p.Graph.Coauthor),
@@ -148,8 +149,13 @@ func Load(ctx context.Context, sp *store.Project, emb index.Embedder) (*Project,
 	p.Corpus = BuildLexical(papers, DefaultBuildOptions())
 	p.Timings["index"] = time.Since(t)
 
+	// The fingerprint, not the paper count, decides whether the cache is
+	// usable: the harvest cap makes most corpora exactly the same size, so a
+	// count check would happily serve the previous corpus's communities. A
+	// graph written before fingerprints existed has none and is rebuilt.
+	fp := graph.Fingerprint(papers)
 	var g graph.Graph
-	if err := sp.LoadJSON("graph.json", &g); err != nil || g.N != len(papers) {
+	if err := sp.LoadJSON("graph.json", &g); err != nil || g.Fingerprint != fp {
 		log.Printf("pipeline: rebuilding artefacts for %s", sp.ID)
 		return Build(ctx, sp, papers, emb, false, nil)
 	}

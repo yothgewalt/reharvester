@@ -30,6 +30,19 @@ reharvester serve   --project dev      # API and UI together on :8000
 reharvester doctor                     # exits non-zero when something is missing
 ```
 
+Give `--keywords` instead of `--categories` and the scope is worked out for you:
+each keyword is probed against arXiv, the categories those records actually sit
+in become the search scope, and every keyword then gets an equal share of
+`--max` so one broad term cannot take the whole corpus.
+
+```bash
+reharvester harvest --project jets --keywords "aerodynamic,fighter jet,radar,missiles" --max 800
+```
+
+Naming both pins the scope exactly and skips the probe. The browser always
+infers, since the harvest form takes keywords, an abstract or PDFs and no
+categories.
+
 Optional, for the top rung of the ladder and for wiki synthesis:
 
 ```bash

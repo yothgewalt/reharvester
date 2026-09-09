@@ -1,6 +1,8 @@
 package graph
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"math/rand/v2"
 	"sort"
 
@@ -26,7 +28,12 @@ type Community struct {
 // Graph is the backbone plus everything derived from it. The backbone, not the
 // raw index, is what makes the system navigable.
 type Graph struct {
-	N           int         `json:"n"`
+	N int `json:"n"`
+	// Fingerprint identifies the corpus this backbone was built from. Reuse of
+	// a cached graph is gated on it: paper counts alone collide, because the
+	// harvest cap makes most corpora exactly the same size, and a stale graph
+	// silently serves the previous corpus's communities.
+	Fingerprint string      `json:"fingerprint,omitempty"`
 	Edges       []Edge      `json:"edges"`
 	Coauthor    []Edge      `json:"coauthor"`
 	Community   []int32     `json:"community"`
@@ -329,4 +336,21 @@ func (g *Graph) bridgeScores() {
 			g.Bridge[i] = cross[i] / total[i]
 		}
 	}
+}
+
+// Fingerprint hashes a corpus by its paper identifiers, order-independently, so
+// two builds over the same records agree and any substitution disagrees. Use it
+// to decide whether a persisted Graph still describes the corpus at hand.
+func Fingerprint(papers []paper.Paper) string {
+	ids := make([]string, len(papers))
+	for i, p := range papers {
+		ids[i] = p.ID
+	}
+	sort.Strings(ids)
+	h := sha256.New()
+	for _, id := range ids {
+		h.Write([]byte(id))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16])
 }

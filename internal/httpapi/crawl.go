@@ -40,11 +40,14 @@ const (
 const maxDeltaNodes = 400
 
 func (s *Server) harvestInit(w http.ResponseWriter, r *http.Request) {
+	// Categories are deliberately left empty: runHarvest infers them from the
+	// keywords. Inheriting s.cfg.Categories here locked every browser harvest
+	// to the configured computer-science set, so an aerospace query returned
+	// language-model papers. The config default still applies to the CLI.
 	q := harvest.Query{
-		Categories: s.cfg.Categories,
-		From:       time.Now().Year() - 7,
-		To:         time.Now().Year(),
-		Max:        s.cfg.HarvestMax,
+		From: time.Now().Year() - 7,
+		To:   time.Now().Year(),
+		Max:  s.cfg.HarvestMax,
 	}
 	var label string
 
@@ -102,6 +105,46 @@ func (s *Server) harvestInit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, TaskResponse{TaskID: taskID, StreamPath: "/api/v1/harvest/stream/" + taskID})
 }
 
+// scopeQuery fills in the arXiv categories to search, by asking arXiv what the
+// keywords are actually about, and records the reasoning in the task log. A
+// query the caller already scoped is left alone.
+//
+// It returns an error only when no keyword matches anything on arXiv, which is
+// worth failing on: the alternative is an unscoped harvest of everything. An
+// inconclusive probe is not an error — the harvest then searches all of arXiv
+// and the keywords do the filtering on their own.
+func (s *Server) scopeQuery(ctx context.Context, c *harvest.Client, q *harvest.Query, task *Task) error {
+	if len(q.Categories) > 0 || len(q.Keywords) == 0 {
+		return nil
+	}
+	task.Log("info", "Probing arXiv for the categories these keywords belong to")
+	cats, profiles, err := c.InferCategories(ctx, q.Keywords)
+	for _, p := range profiles {
+		level := "info"
+		if p.Total == 0 {
+			level = "warn"
+		}
+		task.Log(level, p.String())
+	}
+	if err != nil {
+		return err
+	}
+	q.Categories = cats
+	if len(cats) == 0 {
+		task.Log("warn", "No clear category emerged; searching all of arXiv")
+	} else {
+		task.Log("success", "Scoped to "+strings.Join(cats, ", "))
+	}
+	// Each keyword is harvested as its own query, so log each one: this is the
+	// string that explains an off-topic corpus.
+	for _, kw := range q.Keywords {
+		sub := *q
+		sub.Keywords = []string{kw}
+		task.Log("info", "Query: "+sub.SearchQuery())
+	}
+	return nil
+}
+
 func (s *Server) runHarvest(ctx context.Context, task *Task, projectID, label string, q harvest.Query) {
 	start := time.Now()
 	// Whatever happens, the client must see a done frame: a close without one
@@ -121,13 +164,17 @@ func (s *Server) runHarvest(ctx context.Context, task *Task, projectID, label st
 	_ = sp.SaveJSON("meta.json", &meta)
 
 	task.Log("info", "Harvest task accepted: "+label)
-	task.Log("info", fmt.Sprintf("Query: %s over %v, %d-%d",
-		strings.Join(q.Keywords, " OR "), q.Categories, q.From, q.To))
 	task.Progress(3, "harvest")
 
 	c := harvest.NewClient()
 	if s.cfg.Delay > 0 {
 		c.Delay = s.cfg.Delay
+	}
+	if err := s.scopeQuery(ctx, c, &q, task); err != nil {
+		task.Log("error", err.Error())
+		meta.Status = "failed"
+		_ = sp.SaveJSON("meta.json", &meta)
+		return
 	}
 	papers, err := c.Harvest(ctx, q, func(fetched, total int, msg string) {
 		pct := 3
@@ -316,12 +363,16 @@ func (s *Server) runAction(ctx context.Context, task *Task, projectID, action st
 		var meta store.Meta
 		_ = sp.LoadJSON("meta.json", &meta)
 		q := harvest.Query{
-			Categories: s.cfg.Categories, Keywords: splitComma(meta.Query),
-			From: time.Now().Year() - 7, To: time.Now().Year(), Max: s.cfg.HarvestMax / 2,
+			Keywords: splitComma(meta.Query),
+			From:     time.Now().Year() - 7, To: time.Now().Year(), Max: s.cfg.HarvestMax / 2,
 		}
 		c := harvest.NewClient()
 		if s.cfg.Delay > 0 {
 			c.Delay = s.cfg.Delay
+		}
+		if err := s.scopeQuery(ctx, c, &q, task); err != nil {
+			task.Log("error", err.Error())
+			return
 		}
 		got, err := c.Harvest(ctx, q, func(f, t int, msg string) { task.Log("info", msg) })
 		if err != nil {

@@ -89,8 +89,8 @@ func runCLI(cmd string, args []string) int {
 		data       = fs.String("data", d.DataDir, "directory holding projects and artefacts")
 		addr       = fs.String("addr", d.Addr, "listen address for the local API")
 		project    = fs.String("project", d.Project, "project id to operate on")
-		categories = fs.String("categories", d.Categories, "comma-separated arXiv categories")
-		keywords   = fs.String("keywords", "", "comma-separated keywords to AND with the categories")
+		categories = fs.String("categories", d.Categories, "comma-separated arXiv categories; blank infers them from --keywords")
+		keywords   = fs.String("keywords", "", "comma-separated keywords, each queried for an equal share of --max")
 		from       = fs.Int("from", d.From, "earliest submission year")
 		to         = fs.Int("to", d.To, "latest submission year")
 		maxRecords = fs.Int("max", d.Max, "maximum records to retain")
@@ -137,7 +137,6 @@ func runCLI(cmd string, args []string) int {
 		err = app.Serve(ctx, st, app.ServeConfig{
 			Addr:       *addr,
 			Project:    *project,
-			Categories: app.SplitList(*categories),
 			MaxRecords: *maxRecords,
 			Delay:      *delay,
 			Snapshot:   *snapshot,

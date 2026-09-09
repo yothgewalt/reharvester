@@ -213,7 +213,6 @@ func (m *rootModel) toggleServer() tea.Cmd {
 		err := app.Serve(ctx, st, app.ServeConfig{
 			Addr:       s.Addr,
 			Project:    s.Project,
-			Categories: app.SplitList(s.Categories),
 			MaxRecords: s.Max,
 			Delay:      s.Delay,
 			Snapshot:   s.Snapshot,

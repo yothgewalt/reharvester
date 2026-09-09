@@ -26,7 +26,10 @@ const (
 )
 
 type Client struct {
-	HTTP     *http.Client
+	HTTP *http.Client
+	// BaseURL overrides the arXiv endpoint; empty means the real one. Tests
+	// point it at an httptest server.
+	BaseURL  string
 	Delay    time.Duration
 	PageSize int
 
@@ -43,9 +46,34 @@ func NewClient() *Client {
 	}
 }
 
+func (c *Client) base() string {
+	if c.BaseURL != "" {
+		return c.BaseURL
+	}
+	return endpoint
+}
+
+// pause applies the politeness delay before every request after the first.
+func (c *Client) pause(ctx context.Context) error {
+	if c.warmed {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(c.Delay):
+		}
+	}
+	c.warmed = true
+	return nil
+}
+
 // Query describes one harvest. Categories and Keywords are OR-ed within
 // themselves and AND-ed with each other, so an empty Keywords list means
-// "everything in these categories".
+// "everything in these categories", and an empty Categories list means "every
+// arXiv category".
+//
+// Harvest does not send a multi-keyword Query as one OR-ed request: the
+// broadest keyword would take the whole record cap. It gives each keyword its
+// own quota instead. See Harvest.
 type Query struct {
 	Categories []string
 	Keywords   []string
@@ -53,7 +81,10 @@ type Query struct {
 	Max        int // hard cap on records fetched
 }
 
-func (q Query) searchQuery() string {
+// SearchQuery renders the arXiv search_query this Query sends. Exported so a
+// harvest can log exactly what it asked for: a corpus that comes back on the
+// wrong topic is diagnosed from this string and almost nothing else.
+func (q Query) SearchQuery() string {
 	var clauses []string
 	if len(q.Categories) > 0 {
 		var cats []string
@@ -123,10 +154,16 @@ type entry struct {
 // MinAbstractChars. It returns what it managed to collect even on a mid-stream
 // error, so a flaky network degrades the corpus rather than losing it.
 //
-// A multi-year span is harvested year by year with an equal per-year quota.
-// That matters: arXiv sorts by submission date descending, so a single capped
-// query over 2013-2026 returns only the newest papers and leaves the trend
-// analysis with nothing to compare windows against.
+// A multi-keyword query is split one sub-query per keyword, each with an equal
+// share of Max. Keywords are never OR-ed into a single request: arXiv sorts by
+// date, so the broadest term wins the whole cap. Harvesting "aerodynamic OR
+// fighter jet OR space" as one query returns papers about latent spaces and
+// nothing about aircraft.
+//
+// A multi-year span is then harvested year by year with an equal per-year
+// quota. That matters for the same reason: a single capped query over 2013-2026
+// returns only the newest papers and leaves the trend analysis with nothing to
+// compare windows against.
 func (c *Client) Harvest(ctx context.Context, q Query, prog Progress) ([]paper.Paper, error) {
 	if prog == nil {
 		prog = func(int, int, string) {}
@@ -135,16 +172,52 @@ func (c *Client) Harvest(ctx context.Context, q Query, prog Progress) ([]paper.P
 	if max <= 0 {
 		max = 2000
 	}
+	kws := nonEmpty(q.Keywords)
+	if len(kws) <= 1 {
+		q.Keywords = kws
+		return c.harvestYears(ctx, q, max, nil, prog)
+	}
+
+	// Each keyword keeps its own share whether or not it fills it. Unlike the
+	// per-year quota below, slack is deliberately NOT passed to the keywords
+	// that follow: handing it on is how one broad term takes the corpus while
+	// the specific ones contribute nothing. A thin keyword set therefore
+	// yields fewer than Max records, which is the honest answer.
+	share := (max + len(kws) - 1) / len(kws)
+	seen := make(map[string]struct{}, max)
+	out := make([]paper.Paper, 0, max)
+	for _, kw := range kws {
+		kq := q
+		kq.Keywords, kq.Max = []string{kw}, share
+		before := len(out)
+		got, err := c.harvestYears(ctx, kq, share, seen, func(fetched, total int, msg string) {
+			prog(before+fetched, total, kw+" — "+msg)
+		})
+		out = append(out, got...)
+		prog(len(out), 0, fmt.Sprintf("%s: %d records", kw, len(out)-before))
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+// harvestYears splits one query across its year span. seen may be shared with
+// other calls so a record retained under an earlier keyword is not counted
+// twice; a nil map means start fresh.
+func (c *Client) harvestYears(ctx context.Context, q Query, max int, seen map[string]struct{}, prog Progress) ([]paper.Paper, error) {
 	from, to := q.From, q.To
 	if from <= 0 || to <= 0 || to < from {
-		return c.harvestSpan(ctx, q, max, nil, prog)
+		return c.harvestSpan(ctx, q, max, seen, prog)
 	}
 
 	years := to - from + 1
 	if years == 1 {
-		return c.harvestSpan(ctx, q, max, nil, prog)
+		return c.harvestSpan(ctx, q, max, seen, prog)
 	}
-	seen := make(map[string]struct{}, max)
+	if seen == nil {
+		seen = make(map[string]struct{}, max)
+	}
 	out := make([]paper.Paper, 0, max)
 	for y := to; y >= from; y-- {
 		if len(out) >= max {
@@ -184,14 +257,9 @@ func (c *Client) harvestSpan(ctx context.Context, q Query, max int, seen map[str
 	total := 0
 
 	for start := 0; len(out) < max; start += pageSize {
-		if start > 0 || c.warmed {
-			select {
-			case <-ctx.Done():
-				return out, ctx.Err()
-			case <-time.After(c.Delay):
-			}
+		if err := c.pause(ctx); err != nil {
+			return out, err
 		}
-		c.warmed = true
 		f, err := c.page(ctx, q, start, pageSize)
 		if err != nil {
 			if len(out) > 0 {
@@ -232,13 +300,18 @@ func (c *Client) harvestSpan(ctx context.Context, q Query, max int, seen map[str
 
 func (c *Client) page(ctx context.Context, q Query, start, size int) (*feed, error) {
 	v := url.Values{}
-	v.Set("search_query", q.searchQuery())
+	v.Set("search_query", q.SearchQuery())
 	v.Set("start", fmt.Sprint(start))
 	v.Set("max_results", fmt.Sprint(size))
 	v.Set("sortBy", "submittedDate")
 	v.Set("sortOrder", "descending")
+	return c.fetch(ctx, v)
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+v.Encode(), nil)
+// fetch performs one arXiv request and decodes the Atom feed. Callers own the
+// politeness delay; see Client.pause.
+func (c *Client) fetch(ctx context.Context, v url.Values) (*feed, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base()+"?"+v.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}

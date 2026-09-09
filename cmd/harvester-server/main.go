@@ -32,7 +32,7 @@ func main() {
 		doBuild      = flag.Bool("build", false, "build indexes, backbone and analytics, then exit")
 		doGraph      = flag.Bool("graphcheck", false, "build the backbone both ways and report the pruning cost, then exit")
 		doAnalyze    = flag.Bool("analyze", false, "report trends and gap candidates, then exit")
-		categories   = flag.String("categories", "cs.IR,cs.DL,cs.CL,cs.SI,cs.DB", "comma-separated arXiv categories")
+		categories   = flag.String("categories", "", "comma-separated arXiv categories; blank infers them from --keywords")
 		keywords     = flag.String("keywords", "", "comma-separated keywords to AND with the categories")
 		from         = flag.Int("from", 2013, "earliest submission year")
 		to           = flag.Int("to", time.Now().Year(), "latest submission year")
@@ -73,7 +73,6 @@ func main() {
 		err = app.Serve(ctx, st, app.ServeConfig{
 			Addr:       *addr,
 			Project:    *project,
-			Categories: app.SplitList(*categories),
 			MaxRecords: *maxRecords,
 			Delay:      *delay,
 			Snapshot:   *snapshotSize,

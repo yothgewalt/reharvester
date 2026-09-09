@@ -39,7 +39,7 @@ func DefaultSettings() Settings {
 		DataDir:    ".reharvester",
 		Addr:       ":8000",
 		Project:    "default",
-		Categories: "cs.IR,cs.DL,cs.CL,cs.SI,cs.DB",
+		Categories: "",
 		From:       2013,
 		To:         time.Now().Year(),
 		Max:        2000,

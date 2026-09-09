@@ -27,7 +27,6 @@ import (
 type ServeConfig struct {
 	Addr       string
 	Project    string
-	Categories []string
 	MaxRecords int
 	Delay      time.Duration
 	Snapshot   int
@@ -57,7 +56,6 @@ func Serve(ctx context.Context, st *store.Store, cfg ServeConfig) error {
 		Embedder:     Embedder(ctx, cfg.OllamaURL, cfg.EmbedModel),
 		SnapshotSize: cfg.Snapshot,
 		HarvestMax:   cfg.MaxRecords,
-		Categories:   cfg.Categories,
 		Delay:        cfg.Delay,
 	})
 

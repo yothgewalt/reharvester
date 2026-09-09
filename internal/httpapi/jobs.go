@@ -71,11 +71,10 @@ func (s *Server) RunScheduler(ctx context.Context) {
 				task := s.hub.New(newTaskID(), "harvest")
 				go s.runHarvest(ctx, task, "job-"+j.ID+"-"+now.Format("20060102-1504"),
 					fmt.Sprintf("%s (scheduled)", j.Name), harvest.Query{
-						Categories: s.cfg.Categories,
-						Keywords:   j.Keywords,
-						From:       now.Year() - 7,
-						To:         now.Year(),
-						Max:        s.cfg.HarvestMax,
+						Keywords: j.Keywords,
+						From:     now.Year() - 7,
+						To:       now.Year(),
+						Max:      s.cfg.HarvestMax,
 					})
 			}
 		}
