@@ -53,6 +53,38 @@ jobs:
           npm install -g npm@latest
           npm --version
 
+      # npm's OIDC exchange fails silently by design: when the trusted publisher
+      # is not configured, npm logs the reason at verbose level, returns no
+      # token, and lets the publish continue unauthenticated — which surfaces
+      # three minutes later as a bare 404 on PUT. Do the exchange here instead,
+      # so a misconfiguration fails in seconds and says what is wrong.
+      - name: Confirm npm trusted publishing is configured
+        run: |
+          id_token=$(curl -sSf \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" \
+            | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).value')
+
+          response=$(curl -sS -X POST -w '\n%{http_code}' \
+            -H "Authorization: Bearer $id_token" \
+            https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/reharvester)
+          status=${response##*$'\n'}
+
+          if [ "$status" != "200" ]; then
+            # The success body carries a live registry token; only the failure
+            # body is safe to print.
+            echo "npm refused the OIDC token exchange (HTTP $status):" >&2
+            echo "${response%$'\n'*}" >&2
+            echo >&2
+            echo "Configure the trusted publisher on npmjs.com before releasing:" >&2
+            echo "open the reharvester package, then Settings, then Trusted" >&2
+            echo "Publisher, and add a GitHub Actions publisher with repository" >&2
+            echo "yothgewalt/reharvester, workflow filename release.yml, and no" >&2
+            echo "environment." >&2
+            exit 1
+          fi
+          echo "npm trusted publishing is configured for reharvester."
+
       - name: Resolve the version
         id: version
         env:
