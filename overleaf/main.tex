@@ -19,6 +19,10 @@
 \renewcommand{\textfraction}{0.06}
 \renewcommand{\floatpagefraction}{0.95}
 \renewcommand{\dbltopfraction}{0.92}
+\makeatletter
+\renewcommand\subparagraph{\@startsection{subparagraph}{5}{\parindent}%
+  {3.25ex \@plus 1ex \@minus .2ex}{-1em}{\normalfont\normalsize\bfseries}}
+\makeatother
 \usepackage{titlesec}
 \titlespacing*{\section}{0pt}{7pt plus 1pt minus 1pt}{4pt}
 \titlespacing*{\subsection}{0pt}{6pt plus 1pt minus 1pt}{3pt}

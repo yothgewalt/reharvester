@@ -12,18 +12,27 @@ on:
         required: true
         type: string
 
+# id-token is what npm trusted publishing exchanges for a short-lived registry
+# credential: this workflow holds no NPM_TOKEN, which is what a 2FA policy on
+# the account rejects. contents is write for the release and its assets.
 permissions:
-  contents: read
+  contents: write
   id-token: write
+
+# A release is not safe to interrupt partway through a publish, so a second run
+# queues rather than cancelling the first.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   publish:
     name: Build and publish to npm
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -32,49 +41,102 @@ jobs:
         with:
           bun-version: latest
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           registry-url: https://registry.npmjs.org
 
+      # Trusted publishing needs npm 11.5.1 or newer. Node 22 bundles npm 10,
+      # which ignores OIDC entirely and falls back to looking for a token.
+      - name: Upgrade npm to a version that speaks OIDC
+        run: |
+          npm install -g npm@latest
+          npm --version
+
       - name: Resolve the version
         id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            version="${{ inputs.version }}"
-          else
-            version="${GITHUB_REF_NAME#v}"
+          version="${INPUT_VERSION:-${GITHUB_REF_NAME#v}}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then
+            echo "not a version: $version" >&2
+            exit 1
           fi
           echo "value=$version" >> "$GITHUB_OUTPUT"
           echo "Publishing $version"
 
-      - name: Test before publishing
+      # npm never lets a version be reused, so a re-run of an already-published
+      # tag can only fail. Say why here rather than three minutes later with a
+      # 403 from the registry.
+      - name: Refuse to republish an existing version
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          if npm view "reharvester@$VERSION" version >/dev/null 2>&1; then
+            echo "reharvester@$VERSION is already on the registry and npm never" >&2
+            echo "releases a version number back. Bump the version and tag again." >&2
+            exit 1
+          fi
 
+      # The cross-compile check lives in CI and in release.sh, which builds all
+      # six targets a minute from here; repeating it a third time only costs
+      # release wall-clock.
+      - name: Test before publishing
         run: |
           go build ./cmd/... ./internal/...
           go vet ./cmd/... ./internal/...
           go test ./cmd/... ./internal/...
-          # A target that cannot compile must never reach the registry.
-          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
-            echo "==> $target"
-            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 \
-              go build ./cmd/... ./internal/...
-          done
 
       - name: Build and publish
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: ./scripts/release.sh --version "${{ steps.version.outputs.value }}" --provenance --publish
+          VERSION: ${{ steps.version.outputs.value }}
+        run: ./scripts/release.sh --version "$VERSION" --provenance --publish
 
       - name: Verify the published package installs
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
         run: |
           for i in $(seq 1 20); do
-            if npm view "reharvester@${{ steps.version.outputs.value }}" version >/dev/null 2>&1; then
+            if npm view "reharvester@$VERSION" version >/dev/null 2>&1; then
               break
             fi
             echo "waiting for the registry ($i/20)"
             sleep 15
           done
-          npm install -g "reharvester@${{ steps.version.outputs.value }}"
+          npm install -g "reharvester@$VERSION"
           reharvester --version
           reharvester doctor || true   # warns without Ollama; that is expected
+
+      # Release assets are for people who want the binary without npm. Named by
+      # Go's own GOOS_GOARCH rather than the npm platform suffix, which is what
+      # anyone downloading a binary directly expects to see.
+      - name: Package the binaries
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          mkdir -p dist
+          for dir in npm/reharvester/bin/*/; do
+            platform=$(basename "$dir")
+            case "$platform" in
+              darwin-arm64) name=darwin_arm64 ;;
+              darwin-x64)   name=darwin_amd64 ;;
+              linux-arm64)  name=linux_arm64 ;;
+              linux-x64)    name=linux_amd64 ;;
+              win32-arm64)  name=windows_arm64 ;;
+              win32-x64)    name=windows_amd64 ;;
+              *) echo "unknown platform directory: $platform" >&2; exit 1 ;;
+            esac
+            case "$platform" in
+              win32-*) ( cd "$dir" && zip -qr "$GITHUB_WORKSPACE/dist/reharvester_${VERSION}_${name}.zip" . ) ;;
+              *)       tar -czf "dist/reharvester_${VERSION}_${name}.tar.gz" -C "$dir" . ;;
+            esac
+          done
+          ls -lh dist
+
+      - name: Create the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME" dist/*

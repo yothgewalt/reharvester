@@ -132,22 +132,32 @@ fi
 # 5. Check authentication before uploading anything.
 #
 # npm refuses to reuse a version even after an unpublish, so a failure partway
-# through the loop burns the version: some packages exist at it and the rest
-# never will. Catching a bad token here costs one request and keeps the version
-# reusable. It cannot detect a token that authenticates but is barred from
-# publishing by a 2FA policy — that only surfaces on the first PUT — which is
-# what the recovery message below is for.
-say "checking npm authentication"
-if ! npm_user=$(npm whoami 2>&1); then
-  cat >&2 <<EOF
+# through burns the version. Catching a logged-out shell here costs one request
+# and keeps the version reusable.
+#
+# Under GitHub Actions there is nothing to check: the workflow authenticates
+# with npm trusted publishing, which trades an OIDC token for a short-lived
+# registry credential at publish time. `npm whoami` has no credential to answer
+# with there and would fail every release before it started.
+if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+  say "publishing over OIDC (npm trusted publishing); no token to check"
+else
+  say "checking npm authentication"
+  if ! npm_user=$(npm whoami 2>&1); then
+    cat >&2 <<EOF
 npm is not authenticated: $npm_user
 
-In CI, set the NPM_TOKEN secret to a granular access token with read/write on
-all packages and two-factor bypass enabled. Locally, run: npm login
+Locally, run: npm login
+
+From CI this should not happen — the release workflow publishes over OIDC and
+carries no token. If it does, the trusted publisher is misconfigured: on
+npmjs.com the reharvester package must trust the yothgewalt/reharvester
+repository and the release.yml workflow.
 EOF
-  exit 1
+    exit 1
+  fi
+  say "authenticated as $npm_user"
 fi
-say "authenticated as $npm_user"
 
 # 6. Publish. One package means no ordering rule and no partial state: the
 #    release either lands whole or leaves the version free to reuse.
