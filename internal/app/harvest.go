@@ -11,26 +11,46 @@ import (
 	"github.com/yothgewalt/reharvester/internal/store"
 )
 
-// Harvest fetches a corpus and writes it to the project. This is the only
-// networked operation in the system, and it is bounded by the source API's
-// politeness delay rather than by bandwidth.
-func Harvest(ctx context.Context, st *store.Store, projectID string, q harvest.Query, delay time.Duration) error {
+// Harvest fetches a corpus from the source opts names and writes it to the
+// project. This is the only networked operation in the system, and it is
+// bounded by the source API's politeness delay rather than by bandwidth.
+//
+// progress, when non-nil, receives a percentage of q.Max retained so far and a
+// short stage label. It stays below 100 while running: a thin keyword set can
+// legitimately finish short of Max.
+func Harvest(ctx context.Context, st *store.Store, projectID string, q harvest.Query, opts harvest.Options, progress func(pct int, stage string)) error {
 	if len(q.Categories) == 0 && len(q.Keywords) == 0 {
 		return fmt.Errorf("give at least one category or keyword: an unfiltered query would fetch all of arXiv")
+	}
+	if progress == nil {
+		progress = func(int, string) {}
 	}
 	proj, err := st.Project(projectID)
 	if err != nil {
 		return err
 	}
-	c := harvest.NewClient()
-	c.Delay = delay
-	if err := scope(ctx, c, &q); err != nil {
+	src, err := harvest.Open(opts)
+	if err != nil {
+		return err
+	}
+	progress(0, "preparing the query")
+	if err := scope(ctx, src, &q); err != nil {
 		return err
 	}
 
+	max := q.Max
+	if max <= 0 {
+		max = harvest.DefaultMax
+	}
 	start := time.Now()
-	papers, err := c.Harvest(ctx, q, func(fetched, total int, msg string) {
+	papers, err := src.Harvest(ctx, q, func(fetched, total int, msg string) {
 		log.Printf("harvest: %d retained (%d match this window) — %s", fetched, total, msg)
+		stage := fmt.Sprintf("%d/%d papers", fetched, max)
+		if fetched == 0 {
+			// Local sources scan before they select anything.
+			stage = msg
+		}
+		progress(min(fetched*100/max, 99), stage)
 	})
 	// Harvest returns what it collected alongside any error, and a full harvest
 	// is minutes of politeness-limited network. Keep the partial corpus rather
@@ -69,9 +89,10 @@ func Harvest(ctx context.Context, st *store.Store, projectID string, q harvest.Q
 // scope fills in the arXiv categories to search by asking arXiv what the
 // keywords are about, and reports the reasoning. Categories the caller supplied
 // are left alone, so an explicit --categories still pins the scope exactly and
-// skips the probe entirely.
-func scope(ctx context.Context, c *harvest.Client, q *harvest.Query) error {
-	if len(q.Categories) > 0 || len(q.Keywords) == 0 {
+// skips the probe entirely. Sources other than the arXiv API are not probed.
+func scope(ctx context.Context, src harvest.Source, q *harvest.Query) error {
+	c, ok := src.(harvest.CategoryInferrer)
+	if !ok || len(q.Categories) > 0 || len(q.Keywords) == 0 {
 		return nil
 	}
 	log.Printf("harvest: probing arXiv for the categories these keywords belong to")
@@ -81,6 +102,10 @@ func scope(ctx context.Context, c *harvest.Client, q *harvest.Query) error {
 	}
 	if err != nil {
 		return err
+	}
+	if len(profiles) < len(q.Keywords) {
+		// The probe could not finish (auto dropped a blocked arXiv): nothing to scope.
+		return nil
 	}
 	q.Categories = cats
 	if len(cats) == 0 {

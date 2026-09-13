@@ -29,10 +29,16 @@ type ServeConfig struct {
 	Project    string
 	MaxRecords int
 	Delay      time.Duration
-	Snapshot   int
-	OllamaURL  string
-	EmbedModel string
-	ChatModel  string
+	// Source and SnapshotPath choose where harvests fetch from; see
+	// harvest.Options.
+	Source             string
+	SnapshotPath       string
+	OpenAlexKey        string
+	SemanticScholarKey string
+	Snapshot           int
+	OllamaURL          string
+	EmbedModel         string
+	ChatModel          string
 }
 
 // Serve brings up the local API and blocks until ctx is cancelled. It loads the
@@ -51,12 +57,16 @@ func Serve(ctx context.Context, st *store.Store, cfg ServeConfig) error {
 		log.Printf("api: no model server at %s — wiki pages use template synthesis and /health reports llm unreachable", cfg.OllamaURL)
 	}
 	srv := httpapi.New(st, httpapi.Config{
-		Version:      Version,
-		Ollama:       llm,
-		Embedder:     Embedder(ctx, cfg.OllamaURL, cfg.EmbedModel),
-		SnapshotSize: cfg.Snapshot,
-		HarvestMax:   cfg.MaxRecords,
-		Delay:        cfg.Delay,
+		Version:            Version,
+		Ollama:             llm,
+		Embedder:           Embedder(ctx, cfg.OllamaURL, cfg.EmbedModel),
+		SnapshotSize:       cfg.Snapshot,
+		HarvestMax:         cfg.MaxRecords,
+		Delay:              cfg.Delay,
+		Source:             cfg.Source,
+		SnapshotPath:       cfg.SnapshotPath,
+		OpenAlexKey:        cfg.OpenAlexKey,
+		SemanticScholarKey: cfg.SemanticScholarKey,
 	})
 
 	if id := PickProject(st, cfg.Project); id != "" {

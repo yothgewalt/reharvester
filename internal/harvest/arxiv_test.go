@@ -8,7 +8,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // abstract is long enough to clear MinAbstractChars, which toPaper enforces.
@@ -220,5 +222,69 @@ func TestHarvestKeepsSingleKeywordBehaviourUnchanged(t *testing.T) {
 	}
 	if len(got) != 300 {
 		t.Errorf("harvested %d papers, want 300", len(got))
+	}
+}
+
+func TestFetchRetriesThrottledResponses(t *testing.T) {
+	tests := []struct {
+		name      string
+		throttled int
+		wantErr   bool
+	}{
+		{name: "recovers after two 429s", throttled: 2},
+		{name: "gives up once retries run out", throttled: 1 << 30, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if int(calls.Add(1)) <= tt.throttled {
+					http.Error(w, "slow down", http.StatusTooManyRequests)
+					return
+				}
+				fmt.Fprint(w, feedOf("aerodynamics", "physics.flu-dyn", "2026", 0, 3, 3))
+			}))
+			t.Cleanup(srv.Close)
+			c := &Client{HTTP: srv.Client(), BaseURL: srv.URL}
+
+			_, profiles, err := c.InferCategories(context.Background(), []string{"aerodynamics"})
+
+			wantCalls := int32(tt.throttled + 1)
+			if tt.wantErr {
+				wantCalls = defaultRetries + 1
+				if err == nil || !strings.Contains(err.Error(), "429") {
+					t.Errorf("err = %v, want the 429 surfaced", err)
+				}
+			} else if err != nil || len(profiles) != 1 || profiles[0].Total != 3 {
+				t.Errorf("err = %v, profiles = %+v, want a recovered probe", err, profiles)
+			}
+			if got := calls.Load(); got != wantCalls {
+				t.Errorf("made %d requests, want %d", got, wantCalls)
+			}
+		})
+	}
+}
+
+func TestFetchRetriesARequestThatTimesOut(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			<-r.Context().Done() // stall until the client gives up, as arXiv does
+			return
+		}
+		fmt.Fprint(w, feedOf("aerodynamics", "physics.flu-dyn", "2026", 0, 3, 3))
+	}))
+	t.Cleanup(srv.Close)
+	httpc := srv.Client()
+	httpc.Timeout = 100 * time.Millisecond
+	c := &Client{HTTP: httpc, BaseURL: srv.URL}
+
+	_, profiles, err := c.InferCategories(context.Background(), []string{"aerodynamics"})
+
+	if err != nil || len(profiles) != 1 || profiles[0].Total != 3 {
+		t.Errorf("err = %v, profiles = %+v, want the probe to recover after a timeout", err, profiles)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Errorf("made %d requests, want 2", got)
 	}
 }

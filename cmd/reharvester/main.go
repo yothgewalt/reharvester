@@ -86,20 +86,24 @@ func runCLI(cmd string, args []string) int {
 	fs := flag.NewFlagSet("reharvester "+cmd, flag.ExitOnError)
 	d := DefaultSettings()
 	var (
-		data       = fs.String("data", d.DataDir, "directory holding projects and artefacts")
-		addr       = fs.String("addr", d.Addr, "listen address for the local API")
-		project    = fs.String("project", d.Project, "project id to operate on")
-		categories = fs.String("categories", d.Categories, "comma-separated arXiv categories; blank infers them from --keywords")
-		keywords   = fs.String("keywords", "", "comma-separated keywords, each queried for an equal share of --max")
-		from       = fs.Int("from", d.From, "earliest submission year")
-		to         = fs.Int("to", d.To, "latest submission year")
-		maxRecords = fs.Int("max", d.Max, "maximum records to retain")
-		delay      = fs.Duration("delay", d.Delay, "politeness delay between API requests")
-		approx     = fs.Bool("approx", false, "use the pruned backbone instead of the exact one")
-		ollamaURL  = fs.String("ollama", d.OllamaURL, "local model server")
-		embedModel = fs.String("embed-model", d.EmbedModel, "sentence encoder for tier T3")
-		chatModel  = fs.String("chat-model", d.ChatModel, "generation model for wiki and answers")
-		snapshot   = fs.Int("snapshot-nodes", d.Snapshot, "papers per graph snapshot")
+		data        = fs.String("data", d.DataDir, "directory holding projects and artefacts")
+		addr        = fs.String("addr", d.Addr, "listen address for the local API")
+		project     = fs.String("project", d.Project, "project id to operate on")
+		categories  = fs.String("categories", d.Categories, "comma-separated arXiv categories; blank infers them from --keywords")
+		keywords    = fs.String("keywords", "", "comma-separated keywords, each queried for an equal share of --max")
+		from        = fs.Int("from", d.From, "earliest submission year")
+		to          = fs.Int("to", d.To, "latest submission year")
+		maxRecords  = fs.Int("max", d.Max, "maximum records to retain")
+		delay       = fs.Duration("delay", d.Delay, "politeness delay between API requests")
+		source      = fs.String("source", d.Source, "where to harvest from: "+strings.Join(harvest.Sources, ", "))
+		arxivSnap   = fs.String("arxiv-snapshot", d.SnapshotPath, "Kaggle arxiv-metadata-oai-snapshot.json or .zip, for --source kaggle")
+		openAlexKey = fs.String("openalex-key", "", "API key for --source openalex; prefer the OPENALEX_API_KEY environment variable, since a flag is visible to other local users")
+		s2Key       = fs.String("s2-key", "", "API key for --source semanticscholar; prefer the S2_API_KEY environment variable, since a flag is visible to other local users")
+		approx      = fs.Bool("approx", false, "use the pruned backbone instead of the exact one")
+		ollamaURL   = fs.String("ollama", d.OllamaURL, "local model server")
+		embedModel  = fs.String("embed-model", d.EmbedModel, "sentence encoder for tier T3")
+		chatModel   = fs.String("chat-model", d.ChatModel, "generation model for wiki and answers")
+		snapshot    = fs.Int("snapshot-nodes", d.Snapshot, "papers per graph snapshot")
 	)
 	_ = fs.Parse(args)
 
@@ -125,7 +129,10 @@ func runCLI(cmd string, args []string) int {
 			Categories: app.SplitList(*categories),
 			Keywords:   app.SplitList(*keywords),
 			From:       *from, To: *to, Max: *maxRecords,
-		}, *delay)
+		}, harvest.Options{
+			Name: *source, Delay: *delay, SnapshotPath: *arxivSnap,
+			OpenAlexKey: *openAlexKey, SemanticScholarKey: *s2Key,
+		}, nil)
 	case "build":
 		err = app.Build(ctx, st, *project, app.Embedder(ctx, *ollamaURL, *embedModel),
 			app.BuildOptions{Approx: *approx, EmbedModel: *embedModel})
@@ -135,14 +142,18 @@ func runCLI(cmd string, args []string) int {
 		err = app.GraphCheck(st, *project)
 	case "serve":
 		err = app.Serve(ctx, st, app.ServeConfig{
-			Addr:       *addr,
-			Project:    *project,
-			MaxRecords: *maxRecords,
-			Delay:      *delay,
-			Snapshot:   *snapshot,
-			OllamaURL:  *ollamaURL,
-			EmbedModel: *embedModel,
-			ChatModel:  *chatModel,
+			Addr:               *addr,
+			Project:            *project,
+			MaxRecords:         *maxRecords,
+			Delay:              *delay,
+			Source:             *source,
+			SnapshotPath:       *arxivSnap,
+			OpenAlexKey:        *openAlexKey,
+			SemanticScholarKey: *s2Key,
+			Snapshot:           *snapshot,
+			OllamaURL:          *ollamaURL,
+			EmbedModel:         *embedModel,
+			ChatModel:          *chatModel,
 		})
 	}
 	if err != nil {

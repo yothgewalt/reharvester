@@ -303,9 +303,22 @@ func (m *rootModel) quit() tea.Cmd {
 func (m *rootModel) View() string {
 	body := m.screenBody()
 	if m.status != "" {
-		body += "\n" + styleMuted.Render(m.status)
+		body += "\n\n" + m.statusBlock()
 	}
 	return stylePage.Render(body)
+}
+
+// statusBlock renders the last status message under a label, set apart from
+// the key hints above it. A failed job is labelled as an error; the label is
+// text, so the danger colour is never the only signal. m.err outlives its
+// message — most writers of m.status leave it set — so the error label applies
+// only while the status still reports that error.
+func (m *rootModel) statusBlock() string {
+	label, text := styleEyebrow.Render("MESSAGE"), styleMuted.Render(m.status)
+	if m.err != nil && strings.HasSuffix(m.status, m.err.Error()) {
+		label, text = styleDanger.Render("ERROR"), styleBody.Render(m.status)
+	}
+	return label + "\n" + text
 }
 
 // screenBody renders the active screen without the page padding, which is the
@@ -382,7 +395,7 @@ func (m *rootModel) menu() []menuItem {
 	items := []menuItem{
 		{"s", serverTitle, serverDesc, ""},
 		{"c", "Console", "live server, request and job output", ""},
-		{"h", "Harvest", "fetch a corpus from arXiv", busy},
+		{"h", "Harvest", "fetch a research corpus", busy},
 		{"b", "Build", "indexes, backbone and analytics", firstNonEmpty(busy, noCorpus)},
 		{"p", "Projects", "switch, inspect, analyse and clean corpora", ""},
 		{"d", "Doctor", m.doctorSummary(), ""},
@@ -496,9 +509,6 @@ func (m *rootModel) viewMenu() string {
 			titleStyle.Render(padRight(it.title, w)) + descStyle.Render(desc) + "\n")
 	}
 	b.WriteString(helpLine("↑↓ move · enter select · or press a letter · ctrl+c quit"))
-	if m.err != nil {
-		b.WriteString("\n" + styleDanger.Render(m.err.Error()))
-	}
 	return b.String()
 }
 

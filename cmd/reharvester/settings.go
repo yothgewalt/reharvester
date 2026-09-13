@@ -24,11 +24,19 @@ type Settings struct {
 	To         int           `json:"to"`
 	Max        int           `json:"max"`
 	Delay      time.Duration `json:"delay"`
-	Approx     bool          `json:"approx"`
-	OllamaURL  string        `json:"ollamaUrl"`
-	EmbedModel string        `json:"embedModel"`
-	ChatModel  string        `json:"chatModel"`
-	Snapshot   int           `json:"snapshotNodes"`
+	// Source is one of harvest.Sources; SnapshotPath is the Kaggle arXiv dump
+	// the kaggle source reads.
+	Source       string `json:"source"`
+	SnapshotPath string `json:"arxivSnapshot"`
+	// OpenAlexKey and SemanticScholarKey are API keys. They make the settings
+	// file a secret, which is why Save writes it owner-only.
+	OpenAlexKey        string `json:"openalexKey,omitempty"`
+	SemanticScholarKey string `json:"semanticScholarKey,omitempty"`
+	Approx             bool   `json:"approx"`
+	OllamaURL          string `json:"ollamaUrl"`
+	EmbedModel         string `json:"embedModel"`
+	ChatModel          string `json:"chatModel"`
+	Snapshot           int    `json:"snapshotNodes"`
 }
 
 // DefaultSettings matches the harvester-server flag defaults exactly. Drifting
@@ -44,6 +52,7 @@ func DefaultSettings() Settings {
 		To:         time.Now().Year(),
 		Max:        2000,
 		Delay:      harvest.DefaultDelay,
+		Source:     harvest.SourceArxiv,
 		OllamaURL:  rag.DefaultBaseURL,
 		EmbedModel: rag.DefaultEmbedding,
 		ChatModel:  rag.DefaultChatModel,
@@ -100,6 +109,9 @@ func withDefaults(s Settings) Settings {
 	if s.Delay == 0 {
 		s.Delay = d.Delay
 	}
+	if s.Source == "" {
+		s.Source = d.Source
+	}
 	if s.OllamaURL == "" {
 		s.OllamaURL = d.OllamaURL
 	}
@@ -115,8 +127,9 @@ func withDefaults(s Settings) Settings {
 	return s
 }
 
-// Save persists preferences. Failure is reported to the caller rather than
-// swallowed, but is never fatal: the TUI works fine without a settings file.
+// Save persists preferences, readable by the owner only because they can hold
+// API keys. Failure is reported to the caller rather than swallowed, but is
+// never fatal: the TUI works fine without a settings file.
 func (s Settings) Save() error {
 	if err := os.MkdirAll(s.DataDir, 0o755); err != nil {
 		return err
@@ -125,5 +138,10 @@ func (s Settings) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(settingsPath(s.DataDir), b, 0o644)
+	path := settingsPath(s.DataDir)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		return err
+	}
+	// WriteFile keeps an existing file's mode, and older versions wrote 0644.
+	return os.Chmod(path, 0o600)
 }

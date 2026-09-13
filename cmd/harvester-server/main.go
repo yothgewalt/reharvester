@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -38,6 +39,10 @@ func main() {
 		to           = flag.Int("to", time.Now().Year(), "latest submission year")
 		maxRecords   = flag.Int("max", 2000, "maximum records to retain")
 		delay        = flag.Duration("delay", harvest.DefaultDelay, "politeness delay between API requests")
+		source       = flag.String("source", harvest.SourceArxiv, "where to harvest from: "+strings.Join(harvest.Sources, ", "))
+		snapshotPath = flag.String("arxiv-snapshot", "", "Kaggle arxiv-metadata-oai-snapshot.json or .zip, for --source kaggle")
+		openAlexKey  = flag.String("openalex-key", "", "API key for --source openalex; prefer the OPENALEX_API_KEY environment variable, since a flag is visible to other local users")
+		s2Key        = flag.String("s2-key", "", "API key for --source semanticscholar; prefer the S2_API_KEY environment variable, since a flag is visible to other local users")
 		approx       = flag.Bool("approx", false, "use the inverted-index pruned backbone instead of the exact one")
 		ollamaURL    = flag.String("ollama", rag.DefaultBaseURL, "local model server; the dense tier is skipped when unreachable")
 		embedModel   = flag.String("embed-model", rag.DefaultEmbedding, "sentence encoder model for tier T3")
@@ -59,7 +64,10 @@ func main() {
 			Categories: app.SplitList(*categories),
 			Keywords:   app.SplitList(*keywords),
 			From:       *from, To: *to, Max: *maxRecords,
-		}, *delay)
+		}, harvest.Options{
+			Name: *source, Delay: *delay, SnapshotPath: *snapshotPath,
+			OpenAlexKey: *openAlexKey, SemanticScholarKey: *s2Key,
+		}, nil)
 	case *doBuild:
 		err = app.Build(ctx, st, *project, app.Embedder(ctx, *ollamaURL, *embedModel), app.BuildOptions{
 			Approx:     *approx,
@@ -71,14 +79,18 @@ func main() {
 		err = app.Analyze(st, *project)
 	default:
 		err = app.Serve(ctx, st, app.ServeConfig{
-			Addr:       *addr,
-			Project:    *project,
-			MaxRecords: *maxRecords,
-			Delay:      *delay,
-			Snapshot:   *snapshotSize,
-			OllamaURL:  *ollamaURL,
-			EmbedModel: *embedModel,
-			ChatModel:  *chatModel,
+			Addr:               *addr,
+			Project:            *project,
+			MaxRecords:         *maxRecords,
+			Delay:              *delay,
+			Source:             *source,
+			SnapshotPath:       *snapshotPath,
+			OpenAlexKey:        *openAlexKey,
+			SemanticScholarKey: *s2Key,
+			Snapshot:           *snapshotSize,
+			OllamaURL:          *ollamaURL,
+			EmbedModel:         *embedModel,
+			ChatModel:          *chatModel,
 		})
 	}
 	if err != nil {

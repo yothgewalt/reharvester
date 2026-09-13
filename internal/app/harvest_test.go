@@ -17,7 +17,7 @@ func TestHarvestRefusesAnUnfilteredQuery(t *testing.T) {
 	// Categories used to default to a fixed list, so a blank one was harmless.
 	// Now that blank means "infer from the keywords", blank-and-no-keywords
 	// would ask arXiv for everything it has.
-	err = Harvest(context.Background(), st, "p", harvest.Query{From: 2026, To: 2026, Max: 10}, 0)
+	err = Harvest(context.Background(), st, "p", harvest.Query{From: 2026, To: 2026, Max: 10}, harvest.Options{}, nil)
 	if err == nil {
 		t.Fatal("expected an error when neither categories nor keywords are given")
 	}

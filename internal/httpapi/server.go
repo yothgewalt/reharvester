@@ -34,7 +34,13 @@ type Config struct {
 	SnapshotSize int
 	HarvestMax   int
 	Delay        time.Duration
-	AllowOrigins []string
+	// Source and SnapshotPath choose where harvests fetch from; see
+	// harvest.Options.
+	Source             string
+	SnapshotPath       string
+	OpenAlexKey        string
+	SemanticScholarKey string
+	AllowOrigins       []string
 }
 
 // Server holds one active project at a time. The UI's graph, trends, corpus and

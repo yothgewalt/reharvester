@@ -60,3 +60,5 @@ graft/
 # ships the licence its package.json declares. Tracking it would create a
 # second copy free to drift from the real one.
 /npm/reharvester/LICENSE
+
+*.pdf

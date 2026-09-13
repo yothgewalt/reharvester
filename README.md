@@ -43,6 +43,56 @@ Naming both pins the scope exactly and skips the probe. The browser always
 infers, since the harvest form takes keywords, an abstract or PDFs and no
 categories.
 
+### Harvest sources
+
+arXiv's API rate-limits hard — one request per three seconds, one connection,
+across every machine you run — and answers `429` when it decides you have had
+enough. `--source` (or **Source** on the TUI harvest form; the server uses the
+same setting for browser harvests) picks somewhere else:
+
+| `--source` | What it reads | Keys and limits | Categories |
+|---|---|---|---|
+| `arxiv` (default) | arXiv Atom API | none; 1 request / 3 s | filter, or inferred from keywords |
+| `auto` | arXiv, failing over to OpenAlex, then Semantic Scholar | as each source | inferred while arXiv answers |
+| `kaggle` | [Cornell's arXiv metadata dump](https://www.kaggle.com/datasets/Cornell-University/arxiv), scanned locally | no network at all | filter exactly |
+| `semanticscholar` | Semantic Scholar relevance search | key optional (1 request / s with one) | ignored; papers carry fields of study |
+| `openalex` | OpenAlex works search (articles, preprints, reviews) | key optional ($1/day free with one, $0.10 without) | ignored; papers carry topic subfields |
+| `oai` | arXiv OAI-PMH, the bulk-metadata channel | none | **required** — it lists whole categories |
+
+```bash
+# No network: download arxiv-metadata-oai-snapshot (the .zip is fine) from Kaggle once
+reharvester harvest --project jets --source kaggle --arxiv-snapshot ~/Downloads/archive.zip \
+    --keywords "aerodynamic,fighter jet" --from 2019 --to 2026 --max 800
+
+OPENALEX_API_KEY=... reharvester harvest --project jets --source openalex --keywords "fighter jet"
+reharvester harvest --project flows --source oai --categories physics.flu-dyn --keywords turbulence --from 2025
+```
+
+`auto` sends each keyword-and-year slice to the first source still working.
+A source that gives up once its retries are spent — throttled, down, or
+rejecting a key — is dropped for the rest of that harvest, and its unfinished
+quota moves to the next source, still deduplicated against what was kept.
+Inside `auto` a source retries once, not four times, so a blocked arXiv costs
+about fifteen seconds before the switch. A source that simply has fewer
+matches is not failing, and its short answer stands. If arXiv cannot answer
+the category probe, the harvest continues unscoped instead of stopping.
+
+API keys go in the TUI's **Settings** (masked, saved owner-only in
+`tui-settings.json`, and used by the server it starts), or in
+`OPENALEX_API_KEY` / `S2_API_KEY`. `--openalex-key` and `--s2-key` exist too,
+but a flag is visible to other users of the machine, so prefer the variables.
+Get keys at [openalex.org/settings/api](https://openalex.org/settings/api) and
+[semanticscholar.org/product/api](https://www.semanticscholar.org/product/api).
+
+Every source spends `--max` the same way — an equal share per keyword, then per
+year — and keeps records whose abstract exceeds 200 characters. `kaggle` and
+`oai` match keywords locally as whole words in the title or abstract; the
+others use the provider's own relevance ranking. Papers with an arXiv id keep
+it whatever the source; the rest are `s2:…` or `openalex:W…`. The kaggle source
+re-reads the whole dump (several GB) on each harvest, and `oai` pages through
+every record in a category changed since `--from`, so keep those categories
+narrow.
+
 Optional, for the top rung of the ladder and for wiki synthesis:
 
 ```bash
@@ -138,9 +188,10 @@ server drops T3 to T2 while the system keeps answering.
 Each stage writes a durable artefact under `.reharvester/projects/<id>/`, so any stage can
 be re-run, inspected or replaced without re-running the ones before it.
 
-1. **Harvest** — arXiv Atom API, deduplicated on the version-stripped identifier, abstracts
-   over 200 characters retained. Multi-year spans are quota'd per year, because arXiv sorts
-   by date and a single capped query returns only the newest papers.
+1. **Harvest** — arXiv Atom API by default (or another source, see
+   [Harvest sources](#harvest-sources)), deduplicated on the version-stripped identifier,
+   abstracts over 200 characters retained. Multi-year spans are quota'd per year, because
+   arXiv sorts by date and a single capped query returns only the newest papers.
 2. **Index** — inverted index, TF-IDF (uni + bigrams, sublinear tf, smoothed idf, L2), BM25
    (k1 = 1.5, b = 0.75), and optionally dense. All built over **abstracts only**, which is
    what makes the known-item evaluation a genuine test.
@@ -199,7 +250,7 @@ cmd/reharvester-eval     the paper's tables
 cmd/ws-probe             end-to-end crawl over the real WebSocket
 internal/paper           the record type and the slug rule the whole UI keys on
 internal/store           on-disk layout
-internal/harvest         arXiv client (the only network client)
+internal/harvest         harvest sources: arXiv, Kaggle snapshot, Semantic Scholar, OpenAlex, OAI-PMH
 internal/index           tokenizer, inverted, TF-IDF, BM25, dense
 internal/graph           k-NN backbone (exact and pruned), co-authorship, Louvain, PageRank
 internal/analyze         trends, burst, specificity, permutation-null gaps

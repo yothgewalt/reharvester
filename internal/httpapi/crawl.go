@@ -112,9 +112,11 @@ func (s *Server) harvestInit(w http.ResponseWriter, r *http.Request) {
 // It returns an error only when no keyword matches anything on arXiv, which is
 // worth failing on: the alternative is an unscoped harvest of everything. An
 // inconclusive probe is not an error — the harvest then searches all of arXiv
-// and the keywords do the filtering on their own.
-func (s *Server) scopeQuery(ctx context.Context, c *harvest.Client, q *harvest.Query, task *Task) error {
-	if len(q.Categories) > 0 || len(q.Keywords) == 0 {
+// and the keywords do the filtering on their own. Sources other than the arXiv
+// API are not probed.
+func (s *Server) scopeQuery(ctx context.Context, src harvest.Source, q *harvest.Query, task *Task) error {
+	c, ok := src.(harvest.CategoryInferrer)
+	if !ok || len(q.Categories) > 0 || len(q.Keywords) == 0 {
 		return nil
 	}
 	task.Log("info", "Probing arXiv for the categories these keywords belong to")
@@ -128,6 +130,10 @@ func (s *Server) scopeQuery(ctx context.Context, c *harvest.Client, q *harvest.Q
 	}
 	if err != nil {
 		return err
+	}
+	if len(profiles) < len(q.Keywords) {
+		task.Log("warn", "arXiv could not answer the category probe; harvesting unscoped from the next source")
+		return nil
 	}
 	q.Categories = cats
 	if len(cats) == 0 {
@@ -143,6 +149,14 @@ func (s *Server) scopeQuery(ctx context.Context, c *harvest.Client, q *harvest.Q
 		task.Log("info", "Query: "+sub.SearchQuery())
 	}
 	return nil
+}
+
+// openSource builds the configured harvest source for one task.
+func (s *Server) openSource() (harvest.Source, error) {
+	return harvest.Open(harvest.Options{
+		Name: s.cfg.Source, Delay: s.cfg.Delay, SnapshotPath: s.cfg.SnapshotPath,
+		OpenAlexKey: s.cfg.OpenAlexKey, SemanticScholarKey: s.cfg.SemanticScholarKey,
+	})
 }
 
 func (s *Server) runHarvest(ctx context.Context, task *Task, projectID, label string, q harvest.Query) {
@@ -166,11 +180,11 @@ func (s *Server) runHarvest(ctx context.Context, task *Task, projectID, label st
 	task.Log("info", "Harvest task accepted: "+label)
 	task.Progress(3, "harvest")
 
-	c := harvest.NewClient()
-	if s.cfg.Delay > 0 {
-		c.Delay = s.cfg.Delay
+	c, err := s.openSource()
+	if err == nil {
+		err = s.scopeQuery(ctx, c, &q, task)
 	}
-	if err := s.scopeQuery(ctx, c, &q, task); err != nil {
+	if err != nil {
 		task.Log("error", err.Error())
 		meta.Status = "failed"
 		_ = sp.SaveJSON("meta.json", &meta)
@@ -366,11 +380,11 @@ func (s *Server) runAction(ctx context.Context, task *Task, projectID, action st
 			Keywords: splitComma(meta.Query),
 			From:     time.Now().Year() - 7, To: time.Now().Year(), Max: s.cfg.HarvestMax / 2,
 		}
-		c := harvest.NewClient()
-		if s.cfg.Delay > 0 {
-			c.Delay = s.cfg.Delay
+		c, err := s.openSource()
+		if err == nil {
+			err = s.scopeQuery(ctx, c, &q, task)
 		}
-		if err := s.scopeQuery(ctx, c, &q, task); err != nil {
+		if err != nil {
 			task.Log("error", err.Error())
 			return
 		}

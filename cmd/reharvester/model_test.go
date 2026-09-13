@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -666,6 +667,19 @@ func TestGenuineFailureStillReportsAsFailed(t *testing.T) {
 	if rm.err == nil {
 		t.Error("err should be set for a real failure")
 	}
+
+	view := stripANSI(rm.View())
+	if strings.Count(view, "no such file") != 1 {
+		t.Errorf("the error should be shown once, got:\n%s", view)
+	}
+	if !regexp.MustCompile(`ERROR\s*\n\s*build failed: no such file`).MatchString(view) {
+		t.Errorf("the failure should sit under an ERROR label, got:\n%s", view)
+	}
+
+	rm.Update(statusMsg("opened http://localhost:8000"))
+	if view := stripANSI(rm.View()); strings.Contains(view, "ERROR") {
+		t.Errorf("a later status must not inherit the error label, got:\n%s", view)
+	}
 }
 
 func hasKey(items []menuItem, key string) bool {
@@ -740,4 +754,116 @@ func TestCollapsedNavigation(t *testing.T) {
 			t.Errorf("esc from clean went to %v, want back to projects", got)
 		}
 	})
+}
+
+// TestHarvestFormRandomizeFillsWithoutStarting: enter on the Randomize row
+// refills the form with values that pass validation, and starts nothing.
+func TestHarvestFormRandomizeFillsWithoutStarting(t *testing.T) {
+	m := newTestModel(t)
+	m.form = newHarvestForm(m.settings)
+	m.screen = screenHarvest
+
+	m.updateForm(tea.KeyMsg{Type: tea.KeyUp}) // wraps from the first field to Randomize
+	if !m.form.onShuffleRow() {
+		t.Fatalf("up from the first field should land on Randomize, idx = %d", m.form.idx)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "enter randomize") {
+		t.Errorf("help line should describe the Randomize row, got:\n%s", view)
+	}
+
+	for range 50 {
+		m.updateForm(tea.KeyMsg{Type: tea.KeyEnter})
+		if m.job != "" {
+			t.Fatalf("Randomize started job %q", m.job)
+		}
+		got, ok := m.form.commit(m.settings)
+		if !ok {
+			t.Fatalf("randomized form does not validate: %s", m.form.err)
+		}
+		if n := len(SplitTrim(got.Keywords)); n < 2 || n > 3 || got.Categories != "" || got.From > got.To {
+			t.Fatalf("unexpected randomized settings: %+v", got)
+		}
+	}
+
+	before := m.form.fields[0].input.Value()
+	m.updateForm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if m.form.fields[0].input.Value() != before {
+		t.Error("typing on the Randomize row must not edit a field")
+	}
+}
+
+func TestHarvestFormValidatesSource(t *testing.T) {
+	m := newTestModel(t)
+	f := newHarvestForm(m.settings)
+	f.set("Keywords", "radar")
+
+	f.set("Source", "scopus")
+	if _, ok := f.commit(m.settings); ok || !strings.Contains(f.err, "source must be one of") {
+		t.Errorf("unknown source accepted, err = %q", f.err)
+	}
+	f.set("Source", " OpenAlex ")
+	got, ok := f.commit(m.settings)
+	if !ok || got.Source != "openalex" {
+		t.Errorf("commit = %+v, %v (%s); want the normalised source saved", got.Source, ok, f.err)
+	}
+}
+
+// TestAPIKeysAreMaskedAndSavedPrivately: keys typed into Settings never render
+// in clear, and the file holding them is owner-only even if an older version
+// created it world-readable.
+func TestAPIKeysAreMaskedAndSavedPrivately(t *testing.T) {
+	m := newTestModel(t)
+	path := settingsPath(m.settings.DataDir)
+	if err := os.MkdirAll(m.settings.DataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m.settingsForm = newSettingsForm(m.settings)
+	m.screen = screenSettings
+	m.settingsForm.set("OpenAlex key", "oa-secret-123")
+	m.settingsForm.set("Semantic Scholar key", "s2-secret-456")
+
+	if view := m.View(); strings.Contains(view, "oa-secret-123") || strings.Contains(view, "s2-secret-456") {
+		t.Errorf("settings screen shows a key in clear:\n%s", stripANSI(view))
+	}
+	m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
+
+	saved := LoadSettings(m.settings.DataDir)
+	if saved.OpenAlexKey != "oa-secret-123" || saved.SemanticScholarKey != "s2-secret-456" {
+		t.Errorf("keys not saved: %+v", saved)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("settings file mode = %o, want 600", perm)
+	}
+}
+
+// TestCtrlRRandomizesFromAnyField: the shortcut works while a text field has
+// focus, without typing into it or starting the harvest.
+func TestCtrlRRandomizesFromAnyField(t *testing.T) {
+	m := newTestModel(t)
+	m.form = newHarvestForm(m.settings)
+	m.screen = screenHarvest
+	m.form.set("Keywords", "")
+	if view := stripANSI(m.View()); !strings.Contains(view, "ctrl+r randomize") {
+		t.Errorf("help line should advertise ctrl+r, got:\n%s", view)
+	}
+
+	m.updateForm(tea.KeyMsg{Type: tea.KeyCtrlR})
+
+	if m.job != "" {
+		t.Fatalf("ctrl+r started job %q", m.job)
+	}
+	if m.form.idx != 0 {
+		t.Errorf("focus moved to %d; ctrl+r should leave it on the field", m.form.idx)
+	}
+	got, ok := m.form.commit(m.settings)
+	if !ok || len(SplitTrim(got.Keywords)) < 2 {
+		t.Errorf("form not refilled: keywords %q, ok %v (%s)", got.Keywords, ok, m.form.err)
+	}
 }

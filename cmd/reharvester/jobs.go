@@ -71,7 +71,11 @@ func (m *rootModel) runHarvest(ctx context.Context) error {
 		Categories: app.SplitList(s.Categories),
 		Keywords:   app.SplitList(s.Keywords),
 		From:       s.From, To: s.To, Max: s.Max,
-	}, s.Delay)
+	}, harvest.Options{
+		Name: s.Source, Delay: s.Delay, SnapshotPath: s.SnapshotPath,
+		OpenAlexKey: s.OpenAlexKey, SemanticScholarKey: s.SemanticScholarKey,
+	},
+		tuiReporter{sink: m.sink, ch: m.progressCh}.Progress)
 }
 
 // runSourceBuild rebuilds the UI and the binary from a source checkout. It is
@@ -211,14 +215,18 @@ func (m *rootModel) toggleServer() tea.Cmd {
 	st := m.store
 	return func() tea.Msg {
 		err := app.Serve(ctx, st, app.ServeConfig{
-			Addr:       s.Addr,
-			Project:    s.Project,
-			MaxRecords: s.Max,
-			Delay:      s.Delay,
-			Snapshot:   s.Snapshot,
-			OllamaURL:  s.OllamaURL,
-			EmbedModel: s.EmbedModel,
-			ChatModel:  s.ChatModel,
+			Addr:               s.Addr,
+			Project:            s.Project,
+			MaxRecords:         s.Max,
+			Delay:              s.Delay,
+			Source:             s.Source,
+			SnapshotPath:       s.SnapshotPath,
+			OpenAlexKey:        s.OpenAlexKey,
+			SemanticScholarKey: s.SemanticScholarKey,
+			Snapshot:           s.Snapshot,
+			OllamaURL:          s.OllamaURL,
+			EmbedModel:         s.EmbedModel,
+			ChatModel:          s.ChatModel,
 		})
 		cancel()
 		return serverStoppedMsg{err: err}
