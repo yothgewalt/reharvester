@@ -26,9 +26,10 @@ prose. With neither, the system runs at tier T2 and the header says so; nothing 
 
 Next.js 16 (App Router, Turbopack) · TypeScript 5.9 (pinned — TS7 breaks Next 16.2) ·
 MUI v9 + Tailwind v4 (CSS cascade layers, `mui` below `utilities`) · Zustand ·
-react-markdown + remark-wiki-link + rehype-raw. No WebGL and no graph-rendering
-dependency: the reader is plain DOM and the field map is inline SVG over ~21 nodes,
-which is why both stay fast at corpus scale.
+react-markdown + remark-wiki-link + rehype-raw. sigma.js 3 + graphology +
+ForceAtlas2 (in a Web Worker) draw `/graph` in WebGL; they are dynamic-imported there
+only, so no other route loads them. The reader stays plain DOM and the field map inline
+SVG over ~21 nodes, which is why both stay fast at corpus scale.
 
 Design tokens follow the plane.so taste in the repo-root `CLAUDE.md` (Google Sans 430
 headings at LH 1.30/−3% tracking, black CTAs, 1px-ring depth, #0F0F10 canvas slab,
@@ -37,9 +38,9 @@ accent #006399 as text only).
 ## Layout
 
 AppShell: persistent sidebar (Workspace: Harvest `/`, Trends `/trends`, Reader
-`/reader`, Projects `/projects`) + header with live crawl chip, status and tier.
+`/reader`, Graph `/graph`, Projects `/projects`) + header with live crawl chip, status and tier.
 The scheduler lives as a tab inside a project, not as its own route. Project detail is
-`/projects/detail?id=…` and the reader is `/reader?doc=…` — a static export cannot
+`/projects/detail?id=…`, the reader is `/reader?doc=…` and the graph `/graph?node=…` — a static export cannot
 pre-render a runtime-minted id, so ids travel in the query string behind a `Suspense`
 boundary. Zustand state is client-global, so crawls and selections survive route
 changes; `[[wikilinks]]` select in place rather than navigating away.
@@ -65,6 +66,14 @@ changes; `[[wikilinks]]` select in place rather than navigating away.
   along the backbone with cosine similarities, descending. Right: ask the corpus a
   question; the context set is shown as seed vs. graph-expansion sources against the
   1500-word budget, so you can see what the answer was built from.
+- **Graph** — the loaded snapshot as a WebGL node-link diagram (tested at 6k nodes /
+  47k edges at display refresh rate). Focusing a node — by click, search, or walking the
+  lists — dims everything else and splits its edges into **Out** (papers in its top-k
+  nearest list, dark arrow away) and **In** (papers whose top-k list holds it, accent
+  arrow toward); similar-to and co-author links are mutual, so they count as both. Out/In
+  listboxes sorted by weight mirror the canvas: focusing a row highlights that single
+  edge. Direction and relation filters, zoom/fit, Escape to clear. Layout settles for 3 s
+  (hidden under reduced motion) and is kept across client navigation.
 - **Resilience** — offline status chip, LLM-unreachable badge,
   health polling with auto-recovery, and a capability-tier chip (T0–T3) showing which
   rung the backend is running at.

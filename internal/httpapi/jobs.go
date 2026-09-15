@@ -63,6 +63,7 @@ func (s *Server) RunScheduler(ctx context.Context) {
 			if err != nil {
 				continue
 			}
+			max := s.cfgNow().settings.Max
 			for _, j := range jobs {
 				if j.Status != "active" || !cronMatches(j.Cron, now) {
 					continue
@@ -70,11 +71,11 @@ func (s *Server) RunScheduler(ctx context.Context) {
 				log.Printf("scheduler: firing job %s (%s)", j.ID, j.Name)
 				task := s.hub.New(newTaskID(), "harvest")
 				go s.runHarvest(ctx, task, "job-"+j.ID+"-"+now.Format("20060102-1504"),
-					fmt.Sprintf("%s (scheduled)", j.Name), harvest.Query{
+					fmt.Sprintf("%s (scheduled)", j.Name), "", harvest.Query{
 						Keywords: j.Keywords,
 						From:     now.Year() - 7,
 						To:       now.Year(),
-						Max:      s.cfg.HarvestMax,
+						Max:      max,
 					})
 			}
 		}

@@ -73,7 +73,17 @@ export const theme = createTheme({
     },
   },
   components: {
-    MuiButtonBase: { defaultProps: { disableRipple: true } },
+    MuiButtonBase: {
+      defaultProps: { disableRipple: true },
+      // ButtonBase resets outline in the `mui` layer, which outranks the global
+      // :focus-visible ring in `base`; restore it here.
+      styleOverrides: {
+        root: {
+          "&.Mui-focusVisible": { outline: `2px solid ${color.slab}`, outlineOffset: 2 },
+          "[data-mui-color-scheme='dark'] &.Mui-focusVisible": { outlineColor: color.inkInverse },
+        },
+      },
+    },
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {
@@ -106,7 +116,7 @@ export const theme = createTheme({
           },
           "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
             borderColor: theme.vars.palette.text.primary, // ink focus, never blue
-            borderWidth: 1,
+            borderWidth: 2, // A11Y.md: focus indicator ≥ 2px
           },
 
           "& .MuiOutlinedInput-input::placeholder": { color: color.ink3, opacity: 1 },
@@ -187,9 +197,11 @@ export const theme = createTheme({
           textTransform: "none",
           borderColor: theme.vars.palette.divider,
           color: theme.vars.palette.text.secondary,
-          "&.Mui-selected": {
-            color: theme.vars.palette.text.primary,
-            backgroundColor: theme.vars.palette.action.selected,
+          // Slab fill like selected rail rows: the default 8% tint is ~1.2:1,
+          // too faint to show which option is on (SC 1.4.11).
+          "&.Mui-selected, &.Mui-selected:hover": {
+            color: color.inkInverse,
+            backgroundColor: color.slab,
           },
         }),
       },

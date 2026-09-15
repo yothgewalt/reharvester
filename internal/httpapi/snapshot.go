@@ -8,9 +8,10 @@ import (
 	"github.com/yothgewalt/reharvester/internal/analyze"
 	"github.com/yothgewalt/reharvester/internal/paper"
 	"github.com/yothgewalt/reharvester/internal/pipeline"
+	"github.com/yothgewalt/reharvester/internal/settings"
 )
 
-// DefaultSnapshotNodes caps how many papers a snapshot carries.
+// DefaultSnapshotNodes caps how many papers a snapshot carries by default.
 //
 // This snapshot backs the reader, not the field map: Fig. 2c is drawn from
 // /api/v1/communities and its link counts, which aggregate the whole corpus and
@@ -19,11 +20,13 @@ import (
 // Edges grow far faster than nodes here — both endpoints must be inside the cut
 // — so payload is the binding constraint. Measured on the 24k paper corpus:
 // 1500 nodes is 2.1 MB, 4000 is 6.2 MB, 6000 is 11 MB, and the whole corpus is
-// 83 MB.
+// 83 MB. Those figures predate the one-way nearest-to arcs, which add up to
+// k edges per paper: on the 1,708 paper dark-matter-2022 corpus (all inside
+// the cut) they took the snapshot from 3.8 MB to 6.2 MB.
 //
 // Anything outside this cut has no node id, so the reader renders it as inert
 // text: /ask sources and community members are both subsets of these nodes.
-const DefaultSnapshotNodes = 4000
+const DefaultSnapshotNodes = settings.DefaultSnapshotNodes
 
 // ConceptsPerCommunity is how many centroid terms become concept nodes. The
 // reader linkifies these labels inside abstracts, so they are what makes a
@@ -195,6 +198,11 @@ func BuildSnapshots(p *pipeline.Project, limit int) *Snapshots {
 			return
 		}
 		id := a + "->" + b
+		// A co-author edge can share an arc's ordered pair; slugs never contain
+		// ':', so the prefix keeps the two from deduping each other away.
+		if rel == "nearest-to" {
+			id = "nearest:" + id
+		}
 		if seenEdge[id] {
 			return
 		}
@@ -211,6 +219,18 @@ func BuildSnapshots(p *pipeline.Project, limit int) *Snapshots {
 			if included[int(e.A)] && included[int(e.B)] {
 				addEdge(s.DocIDByPos[int(e.A)], s.DocIDByPos[int(e.B)], float64(e.W), "co-authored-with")
 			}
+		}
+		// Mutual arcs are already the similar-to edges, so only one-way arcs
+		// ship as nearest-to: source lists target in its top-k.
+		mutual := make(map[[2]int32]bool, len(g.Edges))
+		for _, e := range g.Edges {
+			mutual[[2]int32{e.A, e.B}] = true
+		}
+		for _, a := range g.Nearest {
+			if mutual[[2]int32{min(a.A, a.B), max(a.A, a.B)}] || !included[int(a.A)] || !included[int(a.B)] {
+				continue
+			}
+			addEdge(s.DocIDByPos[int(a.A)], s.DocIDByPos[int(a.B)], float64(a.W), "nearest-to")
 		}
 	}
 	for _, c := range concepts {

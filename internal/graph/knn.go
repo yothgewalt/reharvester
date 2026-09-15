@@ -51,6 +51,12 @@ func BuildKNN(tf *index.TFIDF, opt KNNOptions) []Edge {
 	if opt.K <= 0 {
 		opt = DefaultKNNOptions()
 	}
+	return mutualEdges(nearestLists(tf, opt), opt.K)
+}
+
+// nearestLists returns each document's top-k neighbours, most similar first.
+// opt.K must already be positive.
+func nearestLists(tf *index.TFIDF, opt KNNOptions) [][]neighbour {
 	n := tf.N
 	if n == 0 {
 		return nil
@@ -85,8 +91,20 @@ func BuildKNN(tf *index.TFIDF, opt KNNOptions) []Edge {
 	}
 	close(rows)
 	wg.Wait()
+	return top
+}
 
-	return mutualEdges(top, opt.K)
+// nearestArcs flattens top-k lists into directed arcs: A→B means B is in A's
+// top-k, W is their cosine. The result is never nil, so a built graph always
+// serialises "nearest" as an array.
+func nearestArcs(top [][]neighbour) []Edge {
+	arcs := make([]Edge, 0, len(top)*8)
+	for i, ns := range top {
+		for _, nb := range ns {
+			arcs = append(arcs, Edge{A: int32(i), B: nb.doc, W: nb.sim})
+		}
+	}
+	return arcs
 }
 
 func exactTopK(sims []float32, k int) []neighbour {

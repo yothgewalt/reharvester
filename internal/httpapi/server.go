@@ -22,25 +22,25 @@ import (
 	"github.com/yothgewalt/reharvester/internal/paper"
 	"github.com/yothgewalt/reharvester/internal/pipeline"
 	"github.com/yothgewalt/reharvester/internal/rag"
+	"github.com/yothgewalt/reharvester/internal/settings"
 	"github.com/yothgewalt/reharvester/internal/store"
 	"github.com/yothgewalt/reharvester/internal/webui"
 )
 
-// Config carries what the server needs that is not derivable from the store.
+// Config carries what the server needs at construction time. Settings is the
+// starting configuration; PATCH /api/v1/settings changes it live from then
+// on, so handlers read the current value through cfgNow rather than this
+// field.
 type Config struct {
-	Version      string
+	Version  string
+	Settings settings.Settings
+	// Persist controls whether a PATCH writes through to disk: true for
+	// reharvester serve, false for harvester-server, which stays
+	// flag-driven and reproducible.
+	Persist      bool
 	Ollama       *rag.Ollama
 	Embedder     index.Embedder
-	SnapshotSize int
-	HarvestMax   int
-	Delay        time.Duration
-	// Source and SnapshotPath choose where harvests fetch from; see
-	// harvest.Options.
-	Source             string
-	SnapshotPath       string
-	OpenAlexKey        string
-	SemanticScholarKey string
-	AllowOrigins       []string
+	AllowOrigins []string
 }
 
 // Server holds one active project at a time. The UI's graph, trends, corpus and
@@ -50,6 +50,12 @@ type Server struct {
 	store *store.Store
 	hub   *Hub
 	cfg   Config
+
+	// liveMu guards live, the configuration a PATCH can change while the
+	// server runs. cfgNow returns a copy, so a handler that read it once
+	// never needs to hold the lock again.
+	liveMu sync.RWMutex
+	live   liveConfig
 
 	mu       sync.RWMutex
 	project  *pipeline.Project
@@ -65,16 +71,23 @@ type Server struct {
 }
 
 func New(st *store.Store, cfg Config) *Server {
-	if cfg.SnapshotSize <= 0 {
-		cfg.SnapshotSize = DefaultSnapshotNodes
+	if cfg.Settings.Snapshot <= 0 {
+		cfg.Settings.Snapshot = DefaultSnapshotNodes
 	}
-	if cfg.HarvestMax <= 0 {
-		cfg.HarvestMax = 2000
+	if cfg.Settings.Max <= 0 {
+		cfg.Settings.Max = 2000
 	}
 	if len(cfg.AllowOrigins) == 0 {
 		cfg.AllowOrigins = []string{"http://localhost:3000", "http://127.0.0.1:3000"}
 	}
-	return &Server{store: st, hub: NewHub(), cfg: cfg}
+	s := &Server{store: st, hub: NewHub(), cfg: cfg}
+	s.live = liveConfig{
+		settings: cfg.Settings,
+		chat:     rag.NewChat(cfg.Settings.OllamaURL, cfg.Settings.ChatModel, cfg.Settings.OllamaKey),
+		llm:      cfg.Ollama,
+		embedder: cfg.Embedder,
+	}
+	return s
 }
 
 // LoadActive brings a project into memory and renders its snapshots. Every
@@ -85,7 +98,7 @@ func (s *Server) LoadActive(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	p, err := pipeline.Load(ctx, sp, s.cfg.Embedder)
+	p, err := pipeline.Load(ctx, sp, s.cfgNow().embedder)
 	if err != nil {
 		return err
 	}
@@ -95,7 +108,7 @@ func (s *Server) LoadActive(ctx context.Context, id string) error {
 }
 
 func (s *Server) setActive(id string, p *pipeline.Project) {
-	snaps := BuildSnapshots(p, s.cfg.SnapshotSize)
+	snaps := BuildSnapshots(p, s.cfgNow().settings.Snapshot)
 	s.mu.Lock()
 	s.project, s.snaps, s.activeID = p, snaps, id
 	s.mu.Unlock()
@@ -117,6 +130,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health", s.health)
 
 	mux.HandleFunc("POST /api/v1/harvest/init", s.harvestInit)
+	mux.HandleFunc("GET /api/v1/settings", s.getSettings)
+	mux.HandleFunc("PATCH /api/v1/settings", s.patchSettings)
+	mux.HandleFunc("GET /api/v1/keywords/random", s.randomKeywords)
 	mux.HandleFunc("/api/v1/harvest/stream/{taskId}", s.stream)
 	mux.HandleFunc("POST /api/v1/projects/{projectId}/action", s.projectAction)
 	mux.HandleFunc("GET /api/v1/projects", s.projects)
@@ -207,7 +223,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 		if o := r.Header.Get("Origin"); o != "" && allowed[o] {
 			w.Header().Set("Access-Control-Allow-Origin", o)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		}
 		if r.Method == http.MethodOptions {
@@ -232,8 +248,11 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	// A reachable server whose only model is the encoder still cannot generate,
 	// so the badge the UI shows must reflect generation, not reachability.
+	// probeChat re-checks the configured chat client on every call, which is
+	// what lets the badge — and every other consumer of cfgNow().llm — turn on
+	// by itself once Ollama comes up, without waiting for a restart.
 	llm := "unreachable"
-	if s.cfg.Ollama != nil && s.cfg.Ollama.CanGenerate(ctx) {
+	if s.probeChat(ctx, s.cfgNow().chat) {
 		llm = "ok"
 	}
 	p, _ := s.active()
@@ -440,14 +459,14 @@ func (s *Server) wiki(w http.ResponseWriter, r *http.Request) {
 	// Answer now with the template render — a complete page that needs no model
 	// — and synthesise in the background for the next view.
 	w.Write([]byte(rag.Render(d)))
-	if s.cfg.Ollama != nil {
-		s.synthesizeInBackground(docID, d)
+	if llm := s.cfgNow().llm; llm != nil {
+		s.synthesizeInBackground(docID, d, llm)
 	}
 }
 
 // synthesizeInBackground generates at most one orientation section per docId at
 // a time, detached from the request that triggered it.
-func (s *Server) synthesizeInBackground(docID string, d rag.WikiDoc) {
+func (s *Server) synthesizeInBackground(docID string, d rag.WikiDoc, llm *rag.Ollama) {
 	if _, busy := s.synthing.LoadOrStore(docID, true); busy {
 		return
 	}
@@ -455,7 +474,7 @@ func (s *Server) synthesizeInBackground(docID string, d rag.WikiDoc) {
 		defer s.synthing.Delete(docID)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		out := rag.Synthesize(ctx, s.cfg.Ollama, d)
+		out := rag.Synthesize(ctx, llm, d)
 		// Synthesize returns the plain render on any failure; caching that would
 		// pin the page to a version that never improves.
 		if out != rag.Render(d) {
@@ -658,10 +677,10 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 		Hops    int         `json:"hops"`
 	}{Sources: prep.Sources, Tier: prep.Tier, Budget: prep.Budget, Hops: prep.Hops}
 
-	if s.cfg.Ollama != nil {
+	if llm := s.cfgNow().llm; llm != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), askGenerateTimeout)
 		defer cancel()
-		if a, err := rag.Answer(ctx, s.cfg.Ollama, prep.Question, prep.Docs); err == nil {
+		if a, err := rag.Answer(ctx, llm, prep.Question, prep.Docs); err == nil {
 			resp.Answer = a
 		}
 	}
@@ -721,7 +740,8 @@ func (s *Server) askStream(w http.ResponseWriter, r *http.Request) {
 		"budget": prep.Budget, "hops": prep.Hops,
 	})
 
-	if s.cfg.Ollama == nil {
+	llm := s.cfgNow().llm
+	if llm == nil {
 		send("done", map[string]any{"answer": noModelAnswer, "generated": false})
 		return
 	}
@@ -729,7 +749,7 @@ func (s *Server) askStream(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), askStreamTimeout)
 	defer cancel()
 
-	answer, err := rag.AnswerStream(ctx, s.cfg.Ollama, prep.Question, prep.Docs,
+	answer, err := rag.AnswerStream(ctx, llm, prep.Question, prep.Docs,
 		func(chunk string) { send("token", map[string]string{"text": chunk}) })
 
 	// A partial answer plus an error still beats discarding what arrived: the

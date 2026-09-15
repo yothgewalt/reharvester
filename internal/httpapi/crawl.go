@@ -40,15 +40,9 @@ const (
 const maxDeltaNodes = 400
 
 func (s *Server) harvestInit(w http.ResponseWriter, r *http.Request) {
-	// Categories are deliberately left empty: runHarvest infers them from the
-	// keywords. Inheriting s.cfg.Categories here locked every browser harvest
-	// to the configured computer-science set, so an aerospace query returned
-	// language-model papers. The config default still applies to the CLI.
-	q := harvest.Query{
-		From: time.Now().Year() - 7,
-		To:   time.Now().Year(),
-		Max:  s.cfg.HarvestMax,
-	}
+	var opts harvestOptions
+	var optErrs map[string]string
+	var keywords []string
 	var label string
 
 	ct := r.Header.Get("Content-Type")
@@ -58,6 +52,7 @@ func (s *Server) harvestInit(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "upload too large", http.StatusBadRequest)
 			return
 		}
+		opts, optErrs = optionsFromForm(r.MultipartForm.Value)
 		var seed strings.Builder
 		for _, fh := range r.MultipartForm.File["pdf"] {
 			f, err := fh.Open()
@@ -69,39 +64,67 @@ func (s *Server) harvestInit(w http.ResponseWriter, r *http.Request) {
 			seed.WriteString(text)
 			seed.WriteString("\n")
 		}
-		q.Keywords = slugKeywords(seed.String(), 6)
+		keywords = slugKeywords(seed.String(), 6)
 		label = fmt.Sprintf("%d PDF(s)", len(r.MultipartForm.File["pdf"]))
 	default:
 		var req struct {
-			Keywords []string `json:"keywords"`
-			Abstract string   `json:"abstract"`
+			Keywords   []string `json:"keywords"`
+			Abstract   string   `json:"abstract"`
+			Name       string   `json:"name"`
+			Source     string   `json:"source"`
+			Categories []string `json:"categories"`
+			From       int      `json:"from"`
+			To         int      `json:"to"`
+			Max        int      `json:"max"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
+		opts = harvestOptions{
+			Name: req.Name, Source: req.Source, Categories: req.Categories,
+			From: req.From, To: req.To, Max: req.Max,
+		}
 		switch {
 		case len(req.Keywords) > 0:
-			q.Keywords = req.Keywords
+			keywords = req.Keywords
 			label = strings.Join(req.Keywords, ", ")
 		case strings.TrimSpace(req.Abstract) != "":
-			q.Keywords = slugKeywords(req.Abstract, 6)
+			keywords = slugKeywords(req.Abstract, 6)
 			label = firstWords(req.Abstract, 6)
 		default:
 			http.Error(w, "keywords, abstract or pdf is required", http.StatusBadRequest)
 			return
 		}
 	}
-	if len(q.Keywords) == 0 {
+	if len(keywords) == 0 {
 		http.Error(w, "could not derive a query from the input", http.StatusBadRequest)
 		return
+	}
+
+	live := s.cfgNow()
+	def := harvestDefaults{
+		Source: live.settings.Source, Max: live.settings.Max,
+		HasSnapshotPath: strings.TrimSpace(live.settings.SnapshotPath) != "",
+	}
+	q, source, name, errs := resolveHarvest(opts, def, time.Now().Year())
+	for k, v := range optErrs {
+		errs[k] = v
+	}
+	if len(errs) > 0 {
+		writeErrors(w, errs)
+		return
+	}
+	q.Keywords = keywords
+	if name != "" {
+		label = name
 	}
 
 	taskID := newTaskID()
 	task := s.hub.New(taskID, "harvest")
 	// The client uses taskId as its own project id, so the project directory is
 	// named for it and the two stay in step.
-	go s.runHarvest(context.WithoutCancel(r.Context()), task, taskID, label, q)
+	go s.runHarvest(context.WithoutCancel(r.Context()), task, taskID, label, source, q)
 	writeJSON(w, TaskResponse{TaskID: taskID, StreamPath: "/api/v1/harvest/stream/" + taskID})
 }
 
@@ -151,15 +174,20 @@ func (s *Server) scopeQuery(ctx context.Context, src harvest.Source, q *harvest.
 	return nil
 }
 
-// openSource builds the configured harvest source for one task.
-func (s *Server) openSource() (harvest.Source, error) {
+// openSource builds a harvest source for one task. A blank source falls back
+// to the live settings' configured one.
+func (s *Server) openSource(source string) (harvest.Source, error) {
+	live := s.cfgNow()
+	if source == "" {
+		source = live.settings.Source
+	}
 	return harvest.Open(harvest.Options{
-		Name: s.cfg.Source, Delay: s.cfg.Delay, SnapshotPath: s.cfg.SnapshotPath,
-		OpenAlexKey: s.cfg.OpenAlexKey, SemanticScholarKey: s.cfg.SemanticScholarKey,
+		Name: source, Delay: live.settings.Delay, SnapshotPath: live.settings.SnapshotPath,
+		OpenAlexKey: live.settings.OpenAlexKey, SemanticScholarKey: live.settings.SemanticScholarKey,
 	})
 }
 
-func (s *Server) runHarvest(ctx context.Context, task *Task, projectID, label string, q harvest.Query) {
+func (s *Server) runHarvest(ctx context.Context, task *Task, projectID, label, source string, q harvest.Query) {
 	start := time.Now()
 	// Whatever happens, the client must see a done frame: a close without one
 	// marks the project failed and starts six reconnect attempts.
@@ -180,7 +208,7 @@ func (s *Server) runHarvest(ctx context.Context, task *Task, projectID, label st
 	task.Log("info", "Harvest task accepted: "+label)
 	task.Progress(3, "harvest")
 
-	c, err := s.openSource()
+	c, err := s.openSource(source)
 	if err == nil {
 		err = s.scopeQuery(ctx, c, &q, task)
 	}
@@ -220,7 +248,7 @@ func (s *Server) runHarvest(ctx context.Context, task *Task, projectID, label st
 	docs = len(papers)
 	task.Log("success", fmt.Sprintf("Harvested %d papers; the network is no longer needed", docs))
 
-	p, err := pipeline.Build(ctx, sp, papers, s.cfg.Embedder, false, task)
+	p, err := pipeline.Build(ctx, sp, papers, s.cfgNow().embedder, false, task)
 	if err != nil {
 		task.Log("error", "Pipeline failed: "+err.Error())
 		meta.Status = "failed"
@@ -359,6 +387,7 @@ func (s *Server) runAction(ctx context.Context, task *Task, projectID, action st
 	count := 0
 	defer func() { task.Done(count, time.Since(start)) }()
 
+	live := s.cfgNow()
 	sp, err := s.store.Project(projectID)
 	if err != nil {
 		task.Log("error", err.Error())
@@ -378,9 +407,9 @@ func (s *Server) runAction(ctx context.Context, task *Task, projectID, action st
 		_ = sp.LoadJSON("meta.json", &meta)
 		q := harvest.Query{
 			Keywords: splitComma(meta.Query),
-			From:     time.Now().Year() - 7, To: time.Now().Year(), Max: s.cfg.HarvestMax / 2,
+			From:     time.Now().Year() - 7, To: time.Now().Year(), Max: live.settings.Max / 2,
 		}
-		c, err := s.openSource()
+		c, err := s.openSource("")
 		if err == nil {
 			err = s.scopeQuery(ctx, c, &q, task)
 		}
@@ -408,7 +437,7 @@ func (s *Server) runAction(ctx context.Context, task *Task, projectID, action st
 	case "subtract":
 		// Drop the least structurally connected tenth: the documents the
 		// backbone never wired into a neighbourhood.
-		p, err := pipeline.Load(ctx, sp, s.cfg.Embedder)
+		p, err := pipeline.Load(ctx, sp, live.embedder)
 		if err != nil {
 			task.Log("error", err.Error())
 			return
@@ -439,7 +468,7 @@ func (s *Server) runAction(ctx context.Context, task *Task, projectID, action st
 
 	case "summarize":
 		task.Log("info", "Synthesising wiki pages for the most central documents")
-		if s.cfg.Ollama == nil {
+		if live.llm == nil {
 			task.Log("warn", "No local model is reachable — pages will use template synthesis")
 		}
 	}
@@ -451,7 +480,7 @@ func (s *Server) runAction(ctx context.Context, task *Task, projectID, action st
 		}
 	}
 	task.Progress(55, action+"-rebuild")
-	p, err := pipeline.Build(ctx, sp, papers, s.cfg.Embedder, false, task)
+	p, err := pipeline.Build(ctx, sp, papers, live.embedder, false, task)
 	if err != nil {
 		task.Log("error", err.Error())
 		return

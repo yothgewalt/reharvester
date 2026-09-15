@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/yothgewalt/reharvester/internal/app"
+	"github.com/yothgewalt/reharvester/internal/settings"
 	"github.com/yothgewalt/reharvester/internal/store"
 )
 
@@ -100,7 +101,7 @@ type (
 )
 
 func newRootModel(dataDir string) (*rootModel, error) {
-	s := LoadSettings(dataDir)
+	s := settings.Load(dataDir)
 	sink := newLogSink(s.DataDir, "reharvester")
 	// The TUI owns the terminal; log output must go to the sink or it would
 	// tear the rendered frame apart.
@@ -296,7 +297,6 @@ func (m *rootModel) quit() tea.Cmd {
 	if m.jobCancel != nil {
 		m.jobCancel()
 	}
-	_ = m.settings.Save()
 	return tea.Quit
 }
 
@@ -455,6 +455,7 @@ func (m *rootModel) activate(it menuItem) (tea.Model, tea.Cmd) {
 	case "c":
 		m.screen = screenConsole
 	case "h":
+		m.settings = settings.Load(m.settings.DataDir)
 		m.form = newHarvestForm(m.settings)
 		m.screen = screenHarvest
 	case "b":
@@ -469,6 +470,7 @@ func (m *rootModel) activate(it menuItem) (tea.Model, tea.Cmd) {
 		m.screen = screenDoctor
 		return m, m.runChecksCmd()
 	case "t":
+		m.settings = settings.Load(m.settings.DataDir)
 		m.settingsForm = newSettingsForm(m.settings)
 		m.screen = screenSettings
 	case "q":

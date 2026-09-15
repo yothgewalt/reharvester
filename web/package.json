@@ -18,6 +18,8 @@
     "@mui/icons-material": "9.2.0",
     "@mui/material": "9.2.0",
     "@mui/material-nextjs": "9.1.1",
+    "graphology": "0.26.0",
+    "graphology-layout-forceatlas2": "0.10.1",
     "next": "16.2.11",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -25,6 +27,7 @@
     "rehype-raw": "7.0.0",
     "remark-gfm": "^4.0.1",
     "remark-wiki-link": "^2.0.1",
+    "sigma": "3.0.3",
     "zustand": "5.0.14"
   },
   "devDependencies": {
@@ -34,6 +37,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
+    "graphology-types": "0.24.8",
     "tailwindcss": "^4",
     "typescript": "5.9.3",
     "wrangler": "^4"

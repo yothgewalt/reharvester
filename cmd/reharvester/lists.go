@@ -13,6 +13,7 @@ import (
 
 	"github.com/yothgewalt/reharvester/internal/app"
 	"github.com/yothgewalt/reharvester/internal/rag"
+	"github.com/yothgewalt/reharvester/internal/settings"
 	"github.com/yothgewalt/reharvester/internal/store"
 )
 
@@ -148,8 +149,7 @@ func (m *rootModel) updateProjects(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		m.settings.Project = id
-		_ = m.settings.Save()
+		m.settings, _ = settings.Update(m.settings.DataDir, func(s *Settings) { s.Project = id })
 		m.projects = newProjectList(m.store, id)
 		m.status = "active project is now " + id
 		m.checking = true
@@ -232,7 +232,9 @@ func newModelList(s Settings) listModel {
 
 	chatDetail, chatNote := "pulled", ""
 	var chatDep *Dep
-	if !has(s.ChatModel) {
+	if rag.NewChat(s.OllamaURL, s.ChatModel, s.OllamaKey).Cloud() {
+		chatDetail = "Ollama Cloud"
+	} else if !has(s.ChatModel) {
 		chatDetail = "not pulled"
 		chatNote = "wiki pages fall back to template synthesis without a generation model"
 		chatDep = depOllamaModel(s.ChatModel)

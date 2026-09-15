@@ -151,3 +151,32 @@ func TestLoadRebuildsAGraphWrittenBeforeFingerprintsExisted(t *testing.T) {
 		t.Error("a graph with no fingerprint should be rebuilt, not reused")
 	}
 }
+
+func TestLoadRebuildsAGraphWrittenBeforeNearestArcsExisted(t *testing.T) {
+	ctx := context.Background()
+	sp := newProject(t)
+
+	papers := corpus("aero", "aero", 40)
+	if err := sp.WritePapers(papers); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(ctx, sp, papers, nil, false, nil); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	var g graph.Graph
+	if err := sp.LoadJSON("graph.json", &g); err != nil {
+		t.Fatal(err)
+	}
+	g.Nearest = nil
+	if err := sp.SaveJSON("graph.json", &g); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Load(ctx, sp, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Graph.Nearest == nil {
+		t.Error("a graph with no nearest arcs should be rebuilt, not reused")
+	}
+}

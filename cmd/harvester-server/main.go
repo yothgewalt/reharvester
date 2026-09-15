@@ -19,8 +19,8 @@ import (
 
 	"github.com/yothgewalt/reharvester/internal/app"
 	"github.com/yothgewalt/reharvester/internal/harvest"
-	"github.com/yothgewalt/reharvester/internal/httpapi"
 	"github.com/yothgewalt/reharvester/internal/rag"
+	"github.com/yothgewalt/reharvester/internal/settings"
 	"github.com/yothgewalt/reharvester/internal/store"
 )
 
@@ -45,9 +45,10 @@ func main() {
 		s2Key        = flag.String("s2-key", "", "API key for --source semanticscholar; prefer the S2_API_KEY environment variable, since a flag is visible to other local users")
 		approx       = flag.Bool("approx", false, "use the inverted-index pruned backbone instead of the exact one")
 		ollamaURL    = flag.String("ollama", rag.DefaultBaseURL, "local model server; the dense tier is skipped when unreachable")
+		ollamaKey    = flag.String("ollama-key", "", "Ollama Cloud API key, used when --chat-model ends in -cloud; prefer the OLLAMA_API_KEY environment variable, since a flag is visible to other local users")
 		embedModel   = flag.String("embed-model", rag.DefaultEmbedding, "sentence encoder model for tier T3")
 		chatModel    = flag.String("chat-model", rag.DefaultChatModel, "generation model for wiki synthesis and answers")
-		snapshotSize = flag.Int("snapshot-nodes", httpapi.DefaultSnapshotNodes, "papers per graph snapshot served to the UI")
+		snapshotSize = flag.Int("snapshot-nodes", settings.DefaultSnapshotNodes, "papers per graph snapshot served to the UI")
 	)
 	flag.Parse()
 
@@ -69,7 +70,7 @@ func main() {
 			OpenAlexKey: *openAlexKey, SemanticScholarKey: *s2Key,
 		}, nil)
 	case *doBuild:
-		err = app.Build(ctx, st, *project, app.Embedder(ctx, *ollamaURL, *embedModel), app.BuildOptions{
+		err = app.Build(ctx, st, *project, rag.ProbeEmbedder(ctx, *ollamaURL, *embedModel), app.BuildOptions{
 			Approx:     *approx,
 			EmbedModel: *embedModel,
 		})
@@ -78,10 +79,11 @@ func main() {
 	case *doAnalyze:
 		err = app.Analyze(st, *project)
 	default:
-		err = app.Serve(ctx, st, app.ServeConfig{
+		err = app.Serve(ctx, st, settings.Settings{
+			DataDir:            *data,
 			Addr:               *addr,
 			Project:            *project,
-			MaxRecords:         *maxRecords,
+			Max:                *maxRecords,
 			Delay:              *delay,
 			Source:             *source,
 			SnapshotPath:       *snapshotPath,
@@ -89,9 +91,10 @@ func main() {
 			SemanticScholarKey: *s2Key,
 			Snapshot:           *snapshotSize,
 			OllamaURL:          *ollamaURL,
+			OllamaKey:          *ollamaKey,
 			EmbedModel:         *embedModel,
 			ChatModel:          *chatModel,
-		})
+		}, false)
 	}
 	if err != nil {
 		log.Fatalf("%v", err)

@@ -50,20 +50,20 @@ export function ReaderWorkbench() {
 
   return (
     <div className="grid min-h-0 grid-cols-1 overflow-hidden rounded-xl bg-white ring-line lg:grid-cols-[260px_1px_minmax(0,1fr)_1px_340px]">
-      <nav aria-label="Communities" className="min-h-0 max-h-[720px] overflow-y-auto p-4">
+      <nav aria-label="Communities" className="relative min-h-0 max-h-[720px] overflow-y-auto p-4">
         <CommunityRail />
       </nav>
       <div className="hidden bg-line lg:block" />
       <article
         aria-labelledby="reader-title"
-        className="min-h-0 max-h-[720px] overflow-y-auto border-t border-line lg:border-t-0"
+        className="relative min-h-0 max-h-[720px] overflow-y-auto border-t border-line lg:border-t-0"
       >
         <PaperReader />
       </article>
       <div className="hidden bg-line lg:block" />
       <section
         aria-labelledby="ask-heading"
-        className="min-h-0 max-h-[720px] overflow-y-auto border-t border-line lg:border-t-0"
+        className="relative min-h-0 max-h-[720px] overflow-y-auto border-t border-line lg:border-t-0"
       >
         <AskRail />
       </section>

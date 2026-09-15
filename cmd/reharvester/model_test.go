@@ -15,6 +15,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+	"github.com/yothgewalt/reharvester/internal/settings"
 	"github.com/yothgewalt/reharvester/internal/store"
 )
 
@@ -225,37 +226,6 @@ func TestBrowseURL(t *testing.T) {
 		if got := browseURL(in); got != want {
 			t.Errorf("browseURL(%q) = %q, want %q", in, got, want)
 		}
-	}
-}
-
-func TestSettingsRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	s := DefaultSettings()
-	s.DataDir = dir
-	s.Addr = ":9123"
-	s.EmbedModel = "nomic-embed-text"
-	if err := s.Save(); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-	got := LoadSettings(dir)
-	if got.Addr != ":9123" || got.EmbedModel != "nomic-embed-text" {
-		t.Fatalf("round trip lost values: %+v", got)
-	}
-	if got.Delay != s.Delay {
-		t.Errorf("delay = %v, want %v", got.Delay, s.Delay)
-	}
-}
-
-// TestLoadSettingsSurvivesCorruption: a bad settings file must not stop the
-// program from starting.
-func TestLoadSettingsSurvivesCorruption(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(settingsPath(dir), []byte("{not json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got := LoadSettings(dir)
-	if got.Addr != DefaultSettings().Addr {
-		t.Fatalf("expected defaults, got %+v", got)
 	}
 }
 
@@ -813,7 +783,7 @@ func TestHarvestFormValidatesSource(t *testing.T) {
 // created it world-readable.
 func TestAPIKeysAreMaskedAndSavedPrivately(t *testing.T) {
 	m := newTestModel(t)
-	path := settingsPath(m.settings.DataDir)
+	path := settings.Path(m.settings.DataDir)
 	if err := os.MkdirAll(m.settings.DataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -830,7 +800,7 @@ func TestAPIKeysAreMaskedAndSavedPrivately(t *testing.T) {
 	}
 	m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
 
-	saved := LoadSettings(m.settings.DataDir)
+	saved := settings.Load(m.settings.DataDir)
 	if saved.OpenAlexKey != "oa-secret-123" || saved.SemanticScholarKey != "s2-secret-456" {
 		t.Errorf("keys not saved: %+v", saved)
 	}

@@ -13,6 +13,8 @@ import type {
   ProjectActionResponse,
   ProjectSummary,
   SchedulerProfile,
+  SettingsPatch,
+  SettingsView,
   TrendKeyword,
 } from "@/types/domain";
 
@@ -24,6 +26,8 @@ const TIMEOUT_MS = 10_000;
 // Generation is allowed 60 s server-side (internal/httpapi/server.go), so an ask
 // on the default budget would otherwise abort and report the backend as down.
 const ASK_TIMEOUT_MS = 65_000;
+// The server gives keyword generation 18 s (internal/httpapi/keywords.go).
+const KEYWORDS_TIMEOUT_MS = 20_000;
 
 async function request(path: string, init?: RequestInit, timeoutMs = TIMEOUT_MS): Promise<Response> {
   let res: Response;
@@ -38,13 +42,23 @@ async function request(path: string, init?: RequestInit, timeoutMs = TIMEOUT_MS)
   }
   if (!res.ok) {
     if (res.status >= 500) reportBackendFailure();
-    throw new ApiError(res.status, `${res.status} ${res.statusText}`, path);
+    const body = res.status >= 400 && res.status < 500 ? await res.json().catch(() => undefined) : undefined;
+    throw new ApiError(res.status, `${res.status} ${res.statusText}`, path, body);
   }
   return res;
 }
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await request(path);
+  return (await res.json()) as T;
+}
+
+async function patchJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await request(path, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   return (await res.json()) as T;
 }
 
@@ -108,6 +122,12 @@ export function createHttpTransport(): ApiTransport {
     listGapPairs: () => getJson<GapReport>("/api/v1/gaps/pairs"),
     listCommunityLinks: () => getJson<CommunityLink[]>("/api/v1/communities/links"),
     ask: (req: AskRequest) => postJson<AskResponse>("/api/v1/ask", req, ASK_TIMEOUT_MS),
+    randomKeywords: async (field: string) => {
+      const path = `/api/v1/keywords/random?field=${encodeURIComponent(field)}`;
+      const res = await request(path, undefined, KEYWORDS_TIMEOUT_MS);
+      const body = (await res.json()) as { keywords?: unknown };
+      return Array.isArray(body.keywords) ? body.keywords.filter((k): k is string => typeof k === "string") : [];
+    },
 
     askStream: async (req, handlers, signal) => {
       // No AbortSignal.timeout here: the stream is alive as long as tokens keep
@@ -163,6 +183,12 @@ export function createHttpTransport(): ApiTransport {
             new File([Uint8Array.from(atob(entry.base64), (c) => c.charCodeAt(0))], entry.name),
           );
         }
+        if (req.name !== undefined) body.append("name", req.name);
+        if (req.source !== undefined) body.append("source", req.source);
+        if (req.categories !== undefined) body.append("categories", req.categories.join(","));
+        if (req.from !== undefined) body.append("from", String(req.from));
+        if (req.to !== undefined) body.append("to", String(req.to));
+        if (req.max !== undefined) body.append("max", String(req.max));
         return request("/api/v1/harvest/init", { method: "POST", body }).then(
           async (res) => (await res.json()) as HarvestInitResponse,
         );
@@ -182,6 +208,8 @@ export function createHttpTransport(): ApiTransport {
       getJson<TrendKeyword[]>(`/api/v1/trends/recalculate?start=${start}&end=${end}`),
     listProjects: () => getJson<ProjectSummary[]>("/api/v1/projects"),
     listJobs: () => getJson<SchedulerProfile[]>("/api/v1/jobs"),
+    getSettings: () => getJson<SettingsView>("/api/v1/settings"),
+    patchSettings: (patch: SettingsPatch) => patchJson<SettingsView>("/api/v1/settings", patch),
     openCrawlSocket: (taskId, onEvent, onStatus) =>
       openReconnectingCrawlSocket(taskId, onEvent, onStatus),
   };

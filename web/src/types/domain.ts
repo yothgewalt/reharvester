@@ -23,8 +23,10 @@ export interface GraphNode {
 }
 
 /** Emitted by internal/httpapi/snapshot.go. "similar-to" carries the backbone
- *  cosine in `weight`; the others are structural and always weight 1. */
-export type GraphRelation = "similar-to" | "co-authored-with" | "appears-in";
+ *  cosine in `weight`; "nearest-to" is a one-way top-k arc (source lists target,
+ *  weight = cosine; mutual pairs are "similar-to" instead); the others are
+ *  structural and always weight 1. */
+export type GraphRelation = "similar-to" | "nearest-to" | "co-authored-with" | "appears-in";
 
 export interface GraphEdge {
   id: string;
@@ -193,7 +195,17 @@ export type IngestPayload =
   | { mode: "abstract"; abstract: string }
   | { mode: "pdf"; files: File[] };
 
-export interface HarvestInitRequest {
+/** Blank/omitted fields fall back to the server's settings-derived defaults. */
+export interface HarvestOptionFields {
+  name?: string;
+  source?: string;
+  categories?: string[];
+  from?: number;
+  to?: number;
+  max?: number;
+}
+
+export interface HarvestInitRequest extends HarvestOptionFields {
   keywords?: string[];
   abstract?: string;
   pdf?: Array<{ name: string; base64: string }>;
@@ -202,6 +214,68 @@ export interface HarvestInitResponse {
   taskId: string;
   streamPath: string;
 }
+
+/** GET /api/v1/settings' `settings` object. Key values (openalexKey, …) are
+ *  never sent — only whether one is set, via the `has*Key` flags. */
+export interface Settings {
+  addr: string;
+  project: string;
+  source: string;
+  max: number;
+  delay: string;
+  arxivSnapshot: string;
+  ollamaUrl: string;
+  chatModel: string;
+  embedModel: string;
+  snapshotNodes: number;
+  hasOpenalexKey: boolean;
+  hasSemanticScholarKey: boolean;
+  hasOllamaKey: boolean;
+}
+
+export interface HarvestDefaults {
+  source: string;
+  from: number;
+  to: number;
+  max: number;
+}
+
+/** GET/PATCH /api/v1/settings response. `persisted: false` means changes
+ *  apply live but are lost on restart (harvester-server, flag-driven). */
+export interface SettingsView {
+  settings: Settings;
+  dataDir: string;
+  persisted: boolean;
+  restartRequired: string[];
+  harvestDefaults: HarvestDefaults;
+  sources: string[];
+  hasSnapshotPath: boolean;
+  notices: string[];
+}
+
+/**
+ * PATCH /api/v1/settings body — send exactly one field per autosave. A secret
+ * key (`openalexKey`, `semanticScholarKey`, `ollamaKey`) set to a non-empty
+ * string saves it, `null` clears it; never send `""`.
+ */
+export interface SettingsPatch {
+  addr?: string;
+  project?: string;
+  source?: string;
+  max?: number;
+  delay?: string;
+  arxivSnapshot?: string;
+  ollamaUrl?: string;
+  chatModel?: string;
+  embedModel?: string;
+  snapshotNodes?: number;
+  openalexKey?: string | null;
+  semanticScholarKey?: string | null;
+  ollamaKey?: string | null;
+}
+
+/** `errors[field]` returned by a 400 on /api/v1/settings or /api/v1/harvest/init. */
+export type FieldErrors = Record<string, string>;
 
 export interface JobRegisterRequest {
   name: string;

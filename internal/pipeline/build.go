@@ -152,10 +152,11 @@ func Load(ctx context.Context, sp *store.Project, emb index.Embedder) (*Project,
 	// The fingerprint, not the paper count, decides whether the cache is
 	// usable: the harvest cap makes most corpora exactly the same size, so a
 	// count check would happily serve the previous corpus's communities. A
-	// graph written before fingerprints existed has none and is rebuilt.
+	// graph written before fingerprints existed has none and is rebuilt, and so
+	// is one written before directed nearest arcs existed (Nearest decodes nil).
 	fp := graph.Fingerprint(papers)
 	var g graph.Graph
-	if err := sp.LoadJSON("graph.json", &g); err != nil || g.Fingerprint != fp {
+	if err := sp.LoadJSON("graph.json", &g); err != nil || g.Fingerprint != fp || g.Nearest == nil {
 		log.Printf("pipeline: rebuilding artefacts for %s", sp.ID)
 		return Build(ctx, sp, papers, emb, false, nil)
 	}

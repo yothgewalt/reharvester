@@ -1,9 +1,12 @@
 import type { StateCreator } from "zustand";
 
-import { transport, type CrawlSocketHandle } from "@/lib/api/transport";
+import { toRequestFields } from "@/components/ingestion/harvest-options";
+import { ApiError, transport, type CrawlSocketHandle } from "@/lib/api/transport";
 import type {
   CrawlLogEntry,
   CrawlStreamEvent,
+  FieldErrors,
+  HarvestOptionFields,
   IngestPayload,
   ProjectAction,
   WsStatus,
@@ -52,7 +55,7 @@ export interface CrawlSlice {
   crawlStage: string | null;
   consoleLogHistory: CrawlLogEntry[];
   wsStatus: WsStatus;
-  startCrawl(payload: IngestPayload): Promise<void>;
+  startCrawl(payload: IngestPayload, options?: Partial<HarvestOptionFields>): Promise<FieldErrors | null>;
   startProjectAction(projectId: string, action: ProjectAction): Promise<void>;
   appendLog(entry: CrawlLogEntry): void;
   handleStreamEvent(e: CrawlStreamEvent): void;
@@ -68,8 +71,8 @@ export const createCrawlSlice: StateCreator<AppState, [], [], CrawlSlice> = (set
   consoleLogHistory: [],
   wsStatus: "idle",
 
-  startCrawl: async (payload) => {
-    if (get().isCrawlActive) return;
+  startCrawl: async (payload, options) => {
+    if (get().isCrawlActive) return null;
     const summary =
       payload.mode === "keywords"
         ? payload.keywords.join(", ")
@@ -89,9 +92,6 @@ export const createCrawlSlice: StateCreator<AppState, [], [], CrawlSlice> = (set
     });
     get().appendLog(localLog("info", "Submitting harvest request …"));
 
-    // A new harvest builds a new corpus, so nothing carried over from the old
-    // one should stay on screen. The graph_delta frames repopulate it.
-    get().resetCorpusView();
     try {
       const req: { keywords?: string[]; abstract?: string; pdf?: Array<{ name: string; base64: string }> } =
         payload.mode === "keywords"
@@ -106,7 +106,13 @@ export const createCrawlSlice: StateCreator<AppState, [], [], CrawlSlice> = (set
                   })),
                 ),
               };
-      const res = await transport.harvestInit(req);
+      const res = await transport.harvestInit({ ...req, ...toRequestFields(options ?? {}) });
+
+      // A new harvest builds a new corpus, so nothing carried over from the old
+      // one should stay on screen — but only once the request is accepted, so a
+      // rejected submission leaves the previous graph in place.
+      get().resetCorpusView();
+
       set({ activeTaskId: res.taskId });
       useProjectsStore.getState().addProject({
         id: res.taskId,
@@ -126,11 +132,13 @@ export const createCrawlSlice: StateCreator<AppState, [], [], CrawlSlice> = (set
           if (s === "closed" && get().isCrawlActive) get().finishCrawl();
         },
       );
+      return null;
     } catch (err) {
       get().appendLog(
         localLog("error", `Harvest init failed: ${err instanceof Error ? err.message : String(err)}`),
       );
       set({ isCrawlActive: false, wsStatus: "closed" });
+      return err instanceof ApiError ? err.fieldErrors : null;
     }
   },
 

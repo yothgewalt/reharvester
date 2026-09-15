@@ -22,6 +22,8 @@ import (
 
 	"github.com/yothgewalt/reharvester/internal/app"
 	"github.com/yothgewalt/reharvester/internal/harvest"
+	"github.com/yothgewalt/reharvester/internal/rag"
+	"github.com/yothgewalt/reharvester/internal/settings"
 	"github.com/yothgewalt/reharvester/internal/store"
 	"github.com/yothgewalt/reharvester/internal/webui"
 )
@@ -84,7 +86,7 @@ func isCommand(s string) bool {
 // script can move between the two binaries without translation.
 func runCLI(cmd string, args []string) int {
 	fs := flag.NewFlagSet("reharvester "+cmd, flag.ExitOnError)
-	d := DefaultSettings()
+	d := settings.Default()
 	var (
 		data        = fs.String("data", d.DataDir, "directory holding projects and artefacts")
 		addr        = fs.String("addr", d.Addr, "listen address for the local API")
@@ -101,6 +103,7 @@ func runCLI(cmd string, args []string) int {
 		s2Key       = fs.String("s2-key", "", "API key for --source semanticscholar; prefer the S2_API_KEY environment variable, since a flag is visible to other local users")
 		approx      = fs.Bool("approx", false, "use the pruned backbone instead of the exact one")
 		ollamaURL   = fs.String("ollama", d.OllamaURL, "local model server")
+		ollamaKey   = fs.String("ollama-key", "", "Ollama Cloud API key, used when --chat-model ends in -cloud; prefer the OLLAMA_API_KEY environment variable, since a flag is visible to other local users")
 		embedModel  = fs.String("embed-model", d.EmbedModel, "sentence encoder for tier T3")
 		chatModel   = fs.String("chat-model", d.ChatModel, "generation model for wiki and answers")
 		snapshot    = fs.Int("snapshot-nodes", d.Snapshot, "papers per graph snapshot")
@@ -112,7 +115,7 @@ func runCLI(cmd string, args []string) int {
 
 	if cmd == "doctor" {
 		return runDoctorCLI(ctx, Settings{
-			DataDir: *data, Addr: *addr, OllamaURL: *ollamaURL,
+			DataDir: *data, Addr: *addr, OllamaURL: *ollamaURL, OllamaKey: *ollamaKey,
 			EmbedModel: *embedModel, ChatModel: *chatModel, Project: *project,
 		})
 	}
@@ -134,27 +137,49 @@ func runCLI(cmd string, args []string) int {
 			OpenAlexKey: *openAlexKey, SemanticScholarKey: *s2Key,
 		}, nil)
 	case "build":
-		err = app.Build(ctx, st, *project, app.Embedder(ctx, *ollamaURL, *embedModel),
+		err = app.Build(ctx, st, *project, rag.ProbeEmbedder(ctx, *ollamaURL, *embedModel),
 			app.BuildOptions{Approx: *approx, EmbedModel: *embedModel})
 	case "analyze":
 		err = app.Analyze(st, *project)
 	case "graphcheck":
 		err = app.GraphCheck(st, *project)
 	case "serve":
-		err = app.Serve(ctx, st, app.ServeConfig{
-			Addr:               *addr,
-			Project:            *project,
-			MaxRecords:         *maxRecords,
-			Delay:              *delay,
-			Source:             *source,
-			SnapshotPath:       *arxivSnap,
-			OpenAlexKey:        *openAlexKey,
-			SemanticScholarKey: *s2Key,
-			Snapshot:           *snapshot,
-			OllamaURL:          *ollamaURL,
-			EmbedModel:         *embedModel,
-			ChatModel:          *chatModel,
+		// Start from whatever is saved for this data directory, and let only the
+		// flags actually named on this invocation override it — an unset flag
+		// must not clobber a value chosen in the web Settings page or the TUI.
+		s := settings.Load(*data)
+		fs.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "addr":
+				s.Addr = *addr
+			case "project":
+				s.Project = *project
+			case "max":
+				s.Max = *maxRecords
+			case "delay":
+				s.Delay = *delay
+			case "source":
+				s.Source = *source
+			case "arxiv-snapshot":
+				s.SnapshotPath = *arxivSnap
+			case "openalex-key":
+				s.OpenAlexKey = *openAlexKey
+			case "s2-key":
+				s.SemanticScholarKey = *s2Key
+			case "ollama":
+				s.OllamaURL = *ollamaURL
+			case "ollama-key":
+				s.OllamaKey = *ollamaKey
+			case "embed-model":
+				s.EmbedModel = *embedModel
+			case "chat-model":
+				s.ChatModel = *chatModel
+			case "snapshot-nodes":
+				s.Snapshot = *snapshot
+			}
 		})
+		s.DataDir = *data
+		err = app.Serve(ctx, st, s, true)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reharvester: %v\n", err)
@@ -168,7 +193,7 @@ func runCLI(cmd string, args []string) int {
 // and logs are read from; everything else lives in the Settings screen.
 func runTUI(args []string) error {
 	fs := flag.NewFlagSet("reharvester", flag.ContinueOnError)
-	dataDir := fs.String("data", DefaultSettings().DataDir, "directory holding projects and artefacts")
+	dataDir := fs.String("data", settings.Default().DataDir, "directory holding projects and artefacts")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import { createAskSlice, type AskSlice } from "./ask-slice";
 import { createCrawlSlice, type CrawlSlice } from "./crawl-slice";
 import { createGraphSlice, type GraphSlice } from "./graph-slice";
 import { createSchedulerSlice, type SchedulerSlice } from "./scheduler-slice";
+import { createSettingsSlice, type SettingsSlice } from "./settings-slice";
 import { createSystemSlice, type SystemSlice } from "./system-slice";
 import { createTrendsSlice, type TrendsSlice } from "./trends-slice";
 import { createWikiSlice, type WikiSlice } from "./wiki-slice";
@@ -14,7 +15,8 @@ export type AppState = SystemSlice &
   WikiSlice &
   TrendsSlice &
   SchedulerSlice &
-  AskSlice;
+  AskSlice &
+  SettingsSlice;
 
 export const useAppStore = create<AppState>()((...a) => ({
   ...createSystemSlice(...a),
@@ -24,4 +26,5 @@ export const useAppStore = create<AppState>()((...a) => ({
   ...createTrendsSlice(...a),
   ...createSchedulerSlice(...a),
   ...createAskSlice(...a),
+  ...createSettingsSlice(...a),
 }));

@@ -16,37 +16,22 @@ import (
 	"time"
 
 	"github.com/yothgewalt/reharvester/internal/httpapi"
-	"github.com/yothgewalt/reharvester/internal/index"
 	"github.com/yothgewalt/reharvester/internal/rag"
+	"github.com/yothgewalt/reharvester/internal/settings"
 	"github.com/yothgewalt/reharvester/internal/store"
 	"github.com/yothgewalt/reharvester/internal/webui"
 )
-
-// ServeConfig carries what the API needs beyond the store. Zero values are not
-// useful defaults — construct it from flags or from the TUI settings screen.
-type ServeConfig struct {
-	Addr       string
-	Project    string
-	MaxRecords int
-	Delay      time.Duration
-	// Source and SnapshotPath choose where harvests fetch from; see
-	// harvest.Options.
-	Source             string
-	SnapshotPath       string
-	OpenAlexKey        string
-	SemanticScholarKey string
-	Snapshot           int
-	OllamaURL          string
-	EmbedModel         string
-	ChatModel          string
-}
 
 // Serve brings up the local API and blocks until ctx is cancelled. It loads the
 // most recent project so the UI has a corpus on first paint, but starts fine
 // with none: every read endpoint answers empty rather than erroring, and the
 // first harvest fills them.
-func Serve(ctx context.Context, st *store.Store, cfg ServeConfig) error {
-	o := rag.NewOllama(cfg.OllamaURL, cfg.EmbedModel, cfg.ChatModel)
+//
+// persist controls whether a later PATCH /api/v1/settings writes through to
+// s.DataDir: true for reharvester serve, false for harvester-server, which
+// stays flag-driven and reproducible across runs.
+func Serve(ctx context.Context, st *store.Store, s settings.Settings, persist bool) error {
+	o := rag.NewChat(s.OllamaURL, s.ChatModel, s.OllamaKey)
 	var llm *rag.Ollama
 	if o.CanGenerate(ctx) {
 		llm = o
@@ -54,22 +39,17 @@ func Serve(ctx context.Context, st *store.Store, cfg ServeConfig) error {
 	} else if o.Available(ctx) {
 		log.Printf("api: model server is up but has no suitable generation model — wiki pages use template synthesis (try: ollama pull %s)", rag.SuggestChatModel())
 	} else {
-		log.Printf("api: no model server at %s — wiki pages use template synthesis and /health reports llm unreachable", cfg.OllamaURL)
+		log.Printf("api: no model server at %s — wiki pages use template synthesis and /health reports llm unreachable", o.BaseURL)
 	}
 	srv := httpapi.New(st, httpapi.Config{
-		Version:            Version,
-		Ollama:             llm,
-		Embedder:           Embedder(ctx, cfg.OllamaURL, cfg.EmbedModel),
-		SnapshotSize:       cfg.Snapshot,
-		HarvestMax:         cfg.MaxRecords,
-		Delay:              cfg.Delay,
-		Source:             cfg.Source,
-		SnapshotPath:       cfg.SnapshotPath,
-		OpenAlexKey:        cfg.OpenAlexKey,
-		SemanticScholarKey: cfg.SemanticScholarKey,
+		Version:  Version,
+		Settings: s,
+		Persist:  persist,
+		Ollama:   llm,
+		Embedder: rag.ProbeEmbedder(ctx, s.OllamaURL, s.EmbedModel),
 	})
 
-	if id := PickProject(st, cfg.Project); id != "" {
+	if id := PickProject(st, s.Project); id != "" {
 		if err := srv.LoadActive(ctx, id); err != nil {
 			log.Printf("api: could not load project %q: %v", id, err)
 		}
@@ -79,7 +59,7 @@ func Serve(ctx context.Context, st *store.Store, cfg ServeConfig) error {
 	go srv.RunScheduler(ctx)
 
 	hs := &http.Server{
-		Addr:    cfg.Addr,
+		Addr:    s.Addr,
 		Handler: srv.Handler(),
 		// Generous: a crawl socket is long-lived, and harvesting is bounded by
 		// the source API's politeness delay rather than by us.
@@ -92,9 +72,9 @@ func Serve(ctx context.Context, st *store.Store, cfg ServeConfig) error {
 		_ = hs.Shutdown(sh)
 	}()
 	if webui.Embedded() {
-		log.Printf("api: listening on %s — open http://localhost%s", cfg.Addr, portSuffix(cfg.Addr))
+		log.Printf("api: listening on %s — open http://localhost%s", s.Addr, portSuffix(s.Addr))
 	} else {
-		log.Printf("api: listening on %s (no UI embedded — API only)", cfg.Addr)
+		log.Printf("api: listening on %s (no UI embedded — API only)", s.Addr)
 	}
 	if err := hs.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
@@ -127,21 +107,6 @@ func PickProject(st *store.Store, preferred string) string {
 		}
 	}
 	return ""
-}
-
-// Embedder returns the T3 encoder, or nil when no model server answers. A nil
-// encoder is the T2 rung of the capability ladder, not an error.
-func Embedder(ctx context.Context, baseURL, model string) index.Embedder {
-	o := rag.NewOllama(baseURL, model, "")
-	if !o.Available(ctx) {
-		log.Printf("encoder: no model server at %s — running at tier T2", baseURL)
-		return nil
-	}
-	if !o.HasModel(ctx, model) {
-		log.Printf("encoder: model %q not pulled (try: ollama pull %s) — running at tier T2", model, model)
-		return nil
-	}
-	return o
 }
 
 // ConsoleReporter prints pipeline stage progress to the log.

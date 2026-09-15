@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -23,17 +24,22 @@ const (
 	DefaultBaseURL   = "http://localhost:11434"
 	DefaultEmbedding = "all-minilm" // 384-dimensional MiniLM, about 45 MB
 	DefaultChatModel = "llama3.2"
+	CloudBaseURL     = "https://ollama.com"
 	embedDim         = 384
 )
 
-// Ollama talks to a local model server. It is the only network client in the
-// system after harvesting, and it never leaves the machine.
+// Ollama talks to a model server. It is the only network client in the system
+// after harvesting, and it never leaves the machine unless NewChat routed a
+// cloud chat model to CloudBaseURL.
 type Ollama struct {
 	BaseURL    string
 	EmbedModel string
 	ChatModel  string
 	HTTP       *http.Client
 	Batch      int
+	// APIKey is sent as a Bearer token on every request when non-empty. Only
+	// set it for CloudBaseURL; a local server has no use for it.
+	APIKey string
 }
 
 func NewOllama(baseURL, embedModel, chatModel string) *Ollama {
@@ -55,6 +61,39 @@ func NewOllama(baseURL, embedModel, chatModel string) *Ollama {
 	}
 }
 
+// NewChat returns the generation client for chatModel. A model named the way a
+// local daemon names cloud models ("gpt-oss:120b-cloud", "glm-4.6:cloud") goes
+// straight to Ollama Cloud under its bare name when a key is available: apiKey,
+// or OLLAMA_API_KEY when that is blank. Any other model, or no key, stays on
+// baseURL exactly as NewOllama would, and the key is not attached.
+func NewChat(baseURL, chatModel, apiKey string) *Ollama {
+	key := strings.TrimSpace(apiKey)
+	if key == "" {
+		key = strings.TrimSpace(os.Getenv("OLLAMA_API_KEY"))
+	}
+	bare, cloud := strings.CutSuffix(chatModel, "-cloud")
+	if !cloud {
+		bare, cloud = strings.CutSuffix(chatModel, ":cloud")
+	}
+	if key == "" || !cloud {
+		return NewOllama(baseURL, "", chatModel)
+	}
+	o := NewOllama(CloudBaseURL, "", bare)
+	o.APIKey = key
+	return o
+}
+
+// Cloud reports whether this client talks to Ollama Cloud rather than a local
+// server.
+func (o *Ollama) Cloud() bool { return o.APIKey != "" }
+
+func (o *Ollama) do(c *http.Client, req *http.Request) (*http.Response, error) {
+	if o.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+o.APIKey)
+	}
+	return c.Do(req)
+}
+
 func (o *Ollama) Dim() int { return embedDim }
 
 // Available reports whether the server answers at all. The health endpoint uses
@@ -64,7 +103,7 @@ func (o *Ollama) Available(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	res, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	res, err := o.do(&http.Client{Timeout: 2 * time.Second}, req)
 	if err != nil {
 		return false
 	}
@@ -79,7 +118,7 @@ func (o *Ollama) HasModel(ctx context.Context, name string) bool {
 	if err != nil {
 		return false
 	}
-	res, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	res, err := o.do(&http.Client{Timeout: 2 * time.Second}, req)
 	if err != nil {
 		return false
 	}
@@ -108,7 +147,7 @@ func (o *Ollama) models(ctx context.Context) []string {
 	if err != nil {
 		return nil
 	}
-	res, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	res, err := o.do(&http.Client{Timeout: 2 * time.Second}, req)
 	if err != nil {
 		return nil
 	}
@@ -248,7 +287,7 @@ func (o *Ollama) embedBatch(ctx context.Context, texts []string) ([][]float32, e
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	res, err := o.HTTP.Do(req)
+	res, err := o.do(o.HTTP, req)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +335,7 @@ func (o *Ollama) GenerateStream(ctx context.Context, system, prompt string, onTo
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	res, err := o.HTTP.Do(req)
+	res, err := o.do(o.HTTP, req)
 	if err != nil {
 		return "", err
 	}
@@ -361,7 +400,7 @@ func (o *Ollama) Generate(ctx context.Context, system, prompt string) (string, e
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	res, err := o.HTTP.Do(req)
+	res, err := o.do(o.HTTP, req)
 	if err != nil {
 		return "", err
 	}

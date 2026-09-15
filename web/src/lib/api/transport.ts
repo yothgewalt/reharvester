@@ -4,6 +4,7 @@ import type {
   Community,
   CommunityLink,
   CrawlStreamEvent,
+  FieldErrors,
   GapReport,
   GraphSnapshot,
   HarvestInitRequest,
@@ -13,6 +14,8 @@ import type {
   ProjectActionResponse,
   ProjectSummary,
   SchedulerProfile,
+  SettingsPatch,
+  SettingsView,
   TrendKeyword,
   WsStatus,
 } from "@/types/domain";
@@ -31,9 +34,23 @@ export class ApiError extends Error {
     public status: number,
     message: string,
     public path: string,
+    /** Parsed JSON body of a 4xx response, when one was sent. Undefined for 5xx/network errors. */
+    public body?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
+  }
+
+  /** `{errors}` shape from a 400 (settings PATCH, harvest init); null otherwise. */
+  get fieldErrors(): FieldErrors | null {
+    if (typeof this.body !== "object" || this.body === null) return null;
+    const errors = (this.body as { errors?: unknown }).errors;
+    if (typeof errors !== "object" || errors === null) return null;
+    const out: FieldErrors = {};
+    for (const [key, value] of Object.entries(errors)) {
+      if (typeof value === "string") out[key] = value;
+    }
+    return Object.keys(out).length > 0 ? out : null;
   }
 }
 
@@ -59,8 +76,13 @@ export interface ApiTransport {
    * screen survive. Returns when the stream closes.
    */
   askStream(req: AskRequest, handlers: AskStreamHandlers, signal?: AbortSignal): Promise<void>;
+  /** Model-written keywords for `field`; an empty list means no model answered. */
+  randomKeywords(field: string): Promise<string[]>;
   listProjects(): Promise<ProjectSummary[]>;
   listJobs(): Promise<SchedulerProfile[]>;
+  getSettings(): Promise<SettingsView>;
+  /** Send exactly one changed field; the server rejects the whole patch on any invalid one. */
+  patchSettings(patch: SettingsPatch): Promise<SettingsView>;
   openCrawlSocket(
     taskId: string,
     onEvent: (e: CrawlStreamEvent) => void,

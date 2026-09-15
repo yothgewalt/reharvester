@@ -33,8 +33,13 @@ type Graph struct {
 	// a cached graph is gated on it: paper counts alone collide, because the
 	// harvest cap makes most corpora exactly the same size, and a stale graph
 	// silently serves the previous corpus's communities.
-	Fingerprint string      `json:"fingerprint,omitempty"`
-	Edges       []Edge      `json:"edges"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Edges       []Edge `json:"edges"`
+	// Nearest holds each document's top-k list as directed arcs (A lists B),
+	// so it breaks the A < B convention Edge documents. A pair present in both
+	// directions is exactly an Edges entry. Nil marks a graph.json written
+	// before arcs existed, which pipeline.Load rebuilds — never add omitempty.
+	Nearest     []Edge      `json:"nearest"`
 	Coauthor    []Edge      `json:"coauthor"`
 	Community   []int32     `json:"community"`
 	Communities []Community `json:"communities"`
@@ -132,13 +137,18 @@ func BuildCoauthor(papers []paper.Paper) []Edge {
 	return edges
 }
 
-// Build assembles the full graph: the mutual k-NN backbone, the co-authorship
-// layer, Louvain communities over the backbone, PageRank, and the per-node
-// bridge score.
+// Build assembles the full graph: the mutual k-NN backbone and the directed
+// top-k arcs it was filtered from, the co-authorship layer, Louvain communities
+// over the backbone, PageRank, and the per-node bridge score.
 func Build(tf *index.TFIDF, papers []paper.Paper, opt KNNOptions) *Graph {
+	if opt.K <= 0 {
+		opt = DefaultKNNOptions()
+	}
+	top := nearestLists(tf, opt)
 	g := &Graph{
 		N:        tf.N,
-		Edges:    BuildKNN(tf, opt),
+		Edges:    mutualEdges(top, opt.K),
+		Nearest:  nearestArcs(top),
 		Coauthor: BuildCoauthor(papers),
 	}
 	g.Index()

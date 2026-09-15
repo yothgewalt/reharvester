@@ -12,6 +12,7 @@ import (
 
 	"github.com/yothgewalt/reharvester/internal/app"
 	"github.com/yothgewalt/reharvester/internal/rag"
+	"github.com/yothgewalt/reharvester/internal/settings"
 	"github.com/yothgewalt/reharvester/internal/store"
 )
 
@@ -67,6 +68,16 @@ func runChecks(ctx context.Context, s Settings) []Check {
 			Detail:  ternary(hasEmbed, "pulled", "not pulled"),
 			Dep:     depOllamaModel(s.EmbedModel),
 		})
+	}
+	if chat := rag.NewChat(s.OllamaURL, s.ChatModel, s.OllamaKey); chat.Cloud() {
+		canGen := chat.CanGenerate(ctx)
+		out = append(out, Check{
+			Name:    "Generation model",
+			Unlocks: "wiki synthesis and answers",
+			Status:  statusIf(canGen, StatusWarn),
+			Detail:  ternary(canGen, "using "+chat.ChatModel+" on Ollama Cloud", chat.ChatModel+" not available on Ollama Cloud — check the key and model name"),
+		})
+	} else if ollamaUp {
 		canGen := o.CanGenerate(probe)
 		out = append(out, Check{
 			Name:    "Generation model",
@@ -239,7 +250,7 @@ func ternary(cond bool, a, b string) string {
 // runDoctorCLI is the scriptable form: a plain table and a non-zero exit when
 // something is missing outright, so CI can gate on it.
 func runDoctorCLI(ctx context.Context, s Settings) int {
-	s = withDefaults(s)
+	s = settings.WithDefaults(s)
 	checks := runChecks(ctx, s)
 	worst := StatusOK
 	for _, c := range checks {

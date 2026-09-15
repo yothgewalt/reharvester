@@ -42,6 +42,11 @@ export function AskRail() {
           minRows={2}
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+            e.preventDefault();
+            if (!loading && question.trim()) e.currentTarget.closest("form")?.requestSubmit();
+          }}
           placeholder="How did dense retrieval displace BM25?"
           slotProps={{ htmlInput: { "aria-labelledby": "ask-heading" } }}
           fullWidth

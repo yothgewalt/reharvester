@@ -1,7 +1,7 @@
 "use client";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { useAppStore } from "@/store";
 import type { Community } from "@/types/domain";
@@ -21,7 +21,6 @@ export function CommunityRail() {
   const selectNode = useAppStore((s) => s.selectNode);
 
   const [query, setQuery] = useState("");
-  const listRef = useRef<HTMLUListElement | null>(null);
 
   const papers = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -33,22 +32,6 @@ export function CommunityRail() {
 
   const searching = query.trim().length > 0;
   const count = searching ? papers.length : communities.length;
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLUListElement>) => {
-    const items = Array.from(
-      listRef.current?.querySelectorAll<HTMLElement>('[role="option"]') ?? [],
-    );
-    if (items.length === 0) return;
-    const active = items.findIndex((el) => el === document.activeElement);
-    let next = -1;
-    if (e.key === "ArrowDown") next = Math.min(items.length - 1, active + 1);
-    else if (e.key === "ArrowUp") next = Math.max(0, active - 1);
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = items.length - 1;
-    if (next < 0) return;
-    e.preventDefault();
-    items[next].focus();
-  };
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
@@ -65,10 +48,9 @@ export function CommunityRail() {
       </Typography>
 
       <ul
-        ref={listRef}
         role="listbox"
         aria-label={searching ? "Search results" : "Communities"}
-        onKeyDown={onKeyDown}
+        onKeyDown={moveOptionFocus}
         className="m-0 flex list-none flex-col gap-1 overflow-y-auto p-0"
       >
         {searching
@@ -99,7 +81,24 @@ export function CommunityRail() {
   );
 }
 
-function Row({
+/** Arrow/Home/End roving focus across the `[role="option"]` rows of a listbox. */
+export function moveOptionFocus(e: React.KeyboardEvent<HTMLElement>) {
+  const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="option"]'));
+  if (items.length === 0) return;
+  const active = items.findIndex((el) => el === document.activeElement);
+  let next = -1;
+  if (e.key === "ArrowDown") next = Math.min(items.length - 1, active + 1);
+  else if (e.key === "ArrowUp") next = Math.max(0, active - 1);
+  else if (e.key === "Home") next = 0;
+  else if (e.key === "End") next = items.length - 1;
+  if (next < 0) return;
+  e.preventDefault();
+  items[next].focus();
+}
+
+/** One listbox option. `onHighlight(true|false)` fires on pointer hover and on
+ *  keyboard focus, so previews work without a mouse. */
+export function Row({
   label,
   meta,
   title,
@@ -107,6 +106,7 @@ function Row({
   selected,
   tabbable,
   onSelect,
+  onHighlight,
 }: {
   label: string;
   meta: string;
@@ -115,9 +115,10 @@ function Row({
   selected: boolean;
   tabbable: boolean;
   onSelect(): void;
+  onHighlight?(on: boolean): void;
 }) {
   return (
-    <li className="contents">
+    <li role="none" className="contents">
       <button
         type="button"
         role="option"
@@ -126,6 +127,10 @@ function Row({
         title={title}
         tabIndex={tabbable || selected ? 0 : -1}
         onClick={onSelect}
+        onMouseEnter={onHighlight && (() => onHighlight(true))}
+        onMouseLeave={onHighlight && (() => onHighlight(false))}
+        onFocus={onHighlight && (() => onHighlight(true))}
+        onBlur={onHighlight && (() => onHighlight(false))}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
@@ -138,7 +143,7 @@ function Row({
       >
         <span className="truncate">{label}</span>
         <span
-          className={`shrink-0 font-mono text-[11px] ${selected ? "text-ink-inverse" : "text-ink-3"}`}
+          className={`shrink-0 font-mono text-[12px] ${selected ? "text-ink-inverse" : "text-ink-3"}`}
         >
           {meta}
         </span>

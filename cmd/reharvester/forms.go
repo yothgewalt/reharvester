@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/yothgewalt/reharvester/internal/harvest"
+	"github.com/yothgewalt/reharvester/internal/settings"
 )
 
 // formModel is a plain vertical field list. Values are parsed on submit rather
@@ -186,8 +187,10 @@ func newSettingsForm(s Settings) formModel {
 				func(s *Settings, v string) error { s.OllamaURL = strings.TrimSpace(v); return nil }),
 			newField("Encoder model", "changing this needs a rebuild", s.EmbedModel,
 				func(s *Settings, v string) error { s.EmbedModel = strings.TrimSpace(v); return nil }),
-			newField("Chat model", "wiki synthesis and answers", s.ChatModel,
+			newField("Chat model", "wiki synthesis and answers; a name ending in -cloud runs on Ollama Cloud", s.ChatModel,
 				func(s *Settings, v string) error { s.ChatModel = strings.TrimSpace(v); return nil }),
+			newSecretField("Ollama key", "optional; for -cloud chat models, blank uses OLLAMA_API_KEY — create one at ollama.com/settings/keys", s.OllamaKey,
+				func(s *Settings, v string) error { s.OllamaKey = strings.TrimSpace(v); return nil }),
 			newField("arXiv snapshot", "Kaggle arxiv-metadata-oai-snapshot .json or .zip, for the kaggle source", s.SnapshotPath,
 				func(s *Settings, v string) error { s.SnapshotPath = strings.TrimSpace(v); return nil }),
 			newSecretField("OpenAlex key", "optional; blank uses OPENALEX_API_KEY — get one at openalex.org/settings/api", s.OpenAlexKey,
@@ -327,12 +330,11 @@ func (m *rootModel) updateForm(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			f.shuffle(f)
 			return m, nil
 		}
-		next, ok := f.commit(m.settings)
+		next, ok := f.commit(settings.Load(m.settings.DataDir))
 		if !ok {
 			return m, nil
 		}
-		m.settings = next
-		_ = m.settings.Save()
+		m.settings, _ = settings.Update(m.settings.DataDir, func(s *Settings) { *s = next })
 		return m, m.startJob("harvest", m.runHarvest)
 	}
 	if f.onShuffleRow() {
@@ -358,17 +360,19 @@ func (m *rootModel) updateSettings(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		f.focus((f.idx - 1 + len(f.fields)) % len(f.fields))
 		return m, nil
 	case "enter":
-		next, ok := f.commit(m.settings)
+		cur := settings.Load(m.settings.DataDir)
+		next, ok := f.commit(cur)
 		if !ok {
 			return m, nil
 		}
-		changedEncoder := next.EmbedModel != m.settings.EmbedModel
-		m.settings = next
-		if err := m.settings.Save(); err != nil {
+		changedEncoder := next.EmbedModel != cur.EmbedModel
+		saved, err := settings.Update(m.settings.DataDir, func(s *Settings) { *s = next })
+		if err != nil {
 			m.status = "could not save settings: " + err.Error()
 		} else {
 			m.status = "settings saved"
 		}
+		m.settings = saved
 		if changedEncoder {
 			m.status = "encoder changed — rebuild before serving, or dense search returns nothing"
 		}

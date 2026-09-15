@@ -15,6 +15,8 @@ import (
 
 	"github.com/yothgewalt/reharvester/internal/app"
 	"github.com/yothgewalt/reharvester/internal/harvest"
+	"github.com/yothgewalt/reharvester/internal/rag"
+	"github.com/yothgewalt/reharvester/internal/settings"
 )
 
 // tuiReporter feeds pipeline progress into the model. Sends are non-blocking:
@@ -53,7 +55,7 @@ func (m *rootModel) startJob(name string, run func(context.Context) error) tea.C
 }
 
 func (m *rootModel) runBuild(ctx context.Context) error {
-	emb := app.Embedder(ctx, m.settings.OllamaURL, m.settings.EmbedModel)
+	emb := rag.ProbeEmbedder(ctx, m.settings.OllamaURL, m.settings.EmbedModel)
 	return app.Build(ctx, m.store, m.settings.Project, emb, app.BuildOptions{
 		Approx:     m.settings.Approx,
 		EmbedModel: m.settings.EmbedModel,
@@ -204,6 +206,7 @@ func (m *rootModel) toggleServer() tea.Cmd {
 		}
 		return nil
 	}
+	m.settings = settings.Load(m.settings.DataDir)
 	if free, detail := portFree(m.settings.Addr); !free {
 		m.status = "cannot start: " + m.settings.Addr + " " + detail
 		return nil
@@ -214,20 +217,7 @@ func (m *rootModel) toggleServer() tea.Cmd {
 	s := m.settings
 	st := m.store
 	return func() tea.Msg {
-		err := app.Serve(ctx, st, app.ServeConfig{
-			Addr:               s.Addr,
-			Project:            s.Project,
-			MaxRecords:         s.Max,
-			Delay:              s.Delay,
-			Source:             s.Source,
-			SnapshotPath:       s.SnapshotPath,
-			OpenAlexKey:        s.OpenAlexKey,
-			SemanticScholarKey: s.SemanticScholarKey,
-			Snapshot:           s.Snapshot,
-			OllamaURL:          s.OllamaURL,
-			EmbedModel:         s.EmbedModel,
-			ChatModel:          s.ChatModel,
-		})
+		err := app.Serve(ctx, st, s, true)
 		cancel()
 		return serverStoppedMsg{err: err}
 	}

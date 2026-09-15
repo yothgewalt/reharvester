@@ -2,7 +2,9 @@
 
 import AutoGraphOutlined from "@mui/icons-material/AutoGraphOutlined";
 import FolderOutlined from "@mui/icons-material/FolderOutlined";
+import HubOutlined from "@mui/icons-material/HubOutlined";
 import MenuBookOutlined from "@mui/icons-material/MenuBookOutlined";
+import SettingsOutlined from "@mui/icons-material/SettingsOutlined";
 import TravelExploreOutlined from "@mui/icons-material/TravelExploreOutlined";
 import Typography from "@mui/material/Typography";
 import Link from "next/link";
@@ -21,11 +23,16 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "Workspace",
     items: [
+      { href: "/projects", label: "Projects", icon: FolderOutlined },
       { href: "/", label: "Harvest", icon: TravelExploreOutlined },
       { href: "/trends", label: "Trends", icon: AutoGraphOutlined },
       { href: "/reader", label: "Reader", icon: MenuBookOutlined },
-      { href: "/projects", label: "Projects", icon: FolderOutlined },
+      { href: "/graph", label: "Graph", icon: HubOutlined },
     ],
+  },
+  {
+    label: "System",
+    items: [{ href: "/settings", label: "Settings", icon: SettingsOutlined }],
   },
 ];
 
@@ -83,7 +90,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <AppHeader />
-        <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+        <main className="relative min-w-0 flex-1 overflow-y-auto">{children}</main>
       </div>
     </div>
   );
