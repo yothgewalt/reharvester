@@ -105,6 +105,7 @@ export function IngestionForm() {
   };
 
   const submit = async (payload: IngestPayload) => {
+    if (detailsRef.current) detailsRef.current.open = false;
     const fieldErrors = await startCrawl(payload, overrides);
     if (!fieldErrors) return;
     setServerErrors(fieldErrors);

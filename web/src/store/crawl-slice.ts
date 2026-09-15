@@ -36,8 +36,16 @@ const fileToBase64 = (file: File): Promise<string> =>
 
 const LOG_CAP = 2000;
 
+const noticeFor = (projectId: string, docsIngested: number, ok: boolean): HarvestNotice => ({
+  projectId,
+  name: useProjectsStore.getState().projects.find((p) => p.id === projectId)?.name ?? "Harvest",
+  docsIngested,
+  ok,
+});
+
 
 let socketHandle: CrawlSocketHandle | null = null;
+let taskKind: "harvest" | "action" | null = null;
 let localLogSeq = 0;
 
 const localLog = (level: CrawlLogEntry["level"], message: string): CrawlLogEntry => ({
@@ -47,7 +55,25 @@ const localLog = (level: CrawlLogEntry["level"], message: string): CrawlLogEntry
   message,
 });
 
+/**
+ * The server sends a done frame whatever happened, so success is read from the
+ * run itself: papers were ingested and nothing was logged at error level.
+ */
+export function harvestSucceeded(docsIngested: number, logs: readonly CrawlLogEntry[]): boolean {
+  return docsIngested > 0 && !logs.some((l) => l.level === "error");
+}
+
+/** Outcome of the last harvest, shown once as a notification until dismissed. */
+export interface HarvestNotice {
+  projectId: string;
+  name: string;
+  docsIngested: number;
+  ok: boolean;
+}
+
 export interface CrawlSlice {
+  harvestNotice: HarvestNotice | null;
+  dismissHarvestNotice(): void;
   isCrawlActive: boolean;
   activeTask: string | null;
   activeTaskId: string | null;
@@ -63,6 +89,8 @@ export interface CrawlSlice {
 }
 
 export const createCrawlSlice: StateCreator<AppState, [], [], CrawlSlice> = (set, get) => ({
+  harvestNotice: null,
+  dismissHarvestNotice: () => set({ harvestNotice: null }),
   isCrawlActive: false,
   activeTask: null,
   activeTaskId: null,
@@ -81,7 +109,9 @@ export const createCrawlSlice: StateCreator<AppState, [], [], CrawlSlice> = (set
           : `${payload.files.length} PDF${payload.files.length === 1 ? "" : "s"}: ${payload.files
               .map((f) => f.name)
               .join(", ")}`;
+    taskKind = "harvest";
     set({
+      harvestNotice: null,
       isCrawlActive: true,
       activeTask: summary,
       activeTaskId: null,
@@ -147,6 +177,7 @@ export const createCrawlSlice: StateCreator<AppState, [], [], CrawlSlice> = (set
     const project = useProjectsStore.getState().projects.find((p) => p.id === projectId);
     if (!project) return;
 
+    taskKind = "action";
     set({
       isCrawlActive: true,
       activeTask: `${project.name} — ${action}`,
@@ -200,15 +231,26 @@ export const createCrawlSlice: StateCreator<AppState, [], [], CrawlSlice> = (set
       case "done": {
         set({ crawlProgress: 100, crawlStage: "done" });
         const { activeTaskId, consoleLogHistory } = get();
+        const isHarvest = taskKind === "harvest";
+        const ok = !isHarvest || harvestSucceeded(e.summary.docsIngested, consoleLogHistory);
         if (activeTaskId) {
           useProjectsStore.getState().finalizeProject(activeTaskId, {
-            status: "complete",
+            status: ok ? "complete" : "failed",
             docsIngested: e.summary.docsIngested,
             logSnapshot: consoleLogHistory,
           });
         }
         get().finishCrawl();
+        // graph_delta frames stop at the server's streaming cap, so the store
+        // holds only part of a large corpus; the reader and search need all of it.
+        void get().loadGraphSnapshot();
         void get().loadCommunities(true);
+        if (isHarvest && activeTaskId) {
+          set({
+            harvestNotice: noticeFor(activeTaskId, e.summary.docsIngested, ok),
+            ...(ok ? { consoleLogHistory: [], crawlProgress: null, crawlStage: null } : {}),
+          });
+        }
         break;
       }
     }
@@ -231,6 +273,7 @@ export const createCrawlSlice: StateCreator<AppState, [], [], CrawlSlice> = (set
           status: "failed",
           logSnapshot: consoleLogHistory,
         });
+        if (taskKind === "harvest") set({ harvestNotice: noticeFor(activeTaskId, 0, false) });
       }
     }
   },

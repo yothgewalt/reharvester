@@ -69,6 +69,17 @@ func (s *Store) Project(id string) (*Project, error) {
 	return &Project{ID: id, dir: dir}, nil
 }
 
+// ExistingProject is Project without the side effect: it reports false instead
+// of creating the directory. Callers must still reject ids containing path
+// separators or dots before passing request input here.
+func (s *Store) ExistingProject(id string) (*Project, bool) {
+	dir := filepath.Join(s.root, "projects", id)
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return nil, false
+	}
+	return &Project{ID: id, dir: dir}, true
+}
+
 func (s *Store) Projects() ([]Meta, error) {
 	entries, err := os.ReadDir(filepath.Join(s.root, "projects"))
 	if err != nil {

@@ -83,26 +83,51 @@ export interface CommunityLink {
   count: number;
 }
 
-export interface AskRequest {
-  question: string;
-  hops?: number;
-  budget?: number;
+export type ChatRole = "user" | "assistant";
+
+export interface ChatRequestMessage {
+  role: ChatRole;
+  content: string;
+}
+
+/** POST body for /api/v1/chat/stream: 1-40 messages, last must be from the
+ *  user, each 1-4000 characters. `pinnedDocId` is retrieved and deduplicated
+ *  first, ahead of the query's own hits. */
+export interface ChatRequest {
+  messages: ChatRequestMessage[];
+  pinnedDocId?: string;
 }
 
 /** `docId` is "" when the paper falls outside the snapshot — render it inert. */
-export interface AskSource {
+export interface ChatSource {
   docId: string;
   title: string;
   viaGraph: boolean;
   words: number;
 }
 
-export interface AskResponse {
-  answer: string;
-  sources: AskSource[];
+/** The `sources` SSE event: arrives almost immediately, well before the answer
+ *  finishes streaming. */
+export interface ChatSourcesMeta {
+  sources: ChatSource[];
   tier: CapabilityTier;
   budget: number;
   hops: number;
+  project: { id: string; name: string };
+}
+
+/** "execute" is a fixed read-only refusal; "no-match" is a fixed
+ *  nothing-in-corpus reply. Both arrive with an empty source list and
+ *  `generated:false`, and never touch the model. */
+export type ChatGuard = "execute" | "no-match";
+
+/** The `done` SSE event. `generated:false` without `guard` means no local
+ *  model answered — `answer` already carries a fallback string. */
+export interface ChatDone {
+  answer: string;
+  generated: boolean;
+  truncated?: boolean;
+  guard?: ChatGuard;
 }
 
 export type TrendDirection = "rising" | "declining";
@@ -148,6 +173,15 @@ export interface Project {
   status: "crawling" | "complete" | "failed";
   docsIngested: number;
   logSnapshot: CrawlLogEntry[];
+  /** True for the project every corpus endpoint currently serves; absent in lists saved before it existed. */
+  active?: boolean;
+}
+
+/** POST /projects/{id}/activate and GET /projects/{id}/activation. Poll while "loading". */
+export interface ActivationStatus {
+  id: string;
+  status: "active" | "loading" | "inactive" | "error";
+  message?: string;
 }
 
 /**

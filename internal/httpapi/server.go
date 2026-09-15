@@ -68,6 +68,13 @@ type Server struct {
 	// synthesis lands in this cache for the next view.
 	wikiSynth sync.Map
 	synthing  sync.Map
+
+	// activateMu guards activations and activateGen. Only the newest
+	// activation may call setActive; an older one finishing late is dropped.
+	activateMu  sync.Mutex
+	activations map[string]activationState
+	activateGen uint64
+	loadProject projectLoader
 }
 
 func New(st *store.Store, cfg Config) *Server {
@@ -80,7 +87,7 @@ func New(st *store.Store, cfg Config) *Server {
 	if len(cfg.AllowOrigins) == 0 {
 		cfg.AllowOrigins = []string{"http://localhost:3000", "http://127.0.0.1:3000"}
 	}
-	s := &Server{store: st, hub: NewHub(), cfg: cfg}
+	s := &Server{store: st, hub: NewHub(), cfg: cfg, activations: map[string]activationState{}, loadProject: pipeline.Load}
 	s.live = liveConfig{
 		settings: cfg.Settings,
 		chat:     rag.NewChat(cfg.Settings.OllamaURL, cfg.Settings.ChatModel, cfg.Settings.OllamaKey),
@@ -136,6 +143,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/harvest/stream/{taskId}", s.stream)
 	mux.HandleFunc("POST /api/v1/projects/{projectId}/action", s.projectAction)
 	mux.HandleFunc("GET /api/v1/projects", s.projects)
+	mux.HandleFunc("POST /api/v1/projects/{projectId}/activate", s.activateProject)
+	mux.HandleFunc("GET /api/v1/projects/{projectId}/activation", s.activation)
 	mux.HandleFunc("POST /api/v1/jobs/register", s.registerJob)
 	mux.HandleFunc("GET /api/v1/jobs", s.listJobs)
 	mux.HandleFunc("GET /api/v1/graph/snapshot", s.snapshot)
@@ -147,6 +156,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/communities/links", s.communityLinks)
 	mux.HandleFunc("POST /api/v1/ask", s.ask)
 	mux.HandleFunc("POST /api/v1/ask/stream", s.askStream)
+	mux.HandleFunc("POST /api/v1/chat/stream", s.chatStream)
 
 	// The UI, when it was built into the binary. Everything above is /health or
 	// /api/v1/*, so this catch-all cannot shadow an endpoint. Absent a build it
@@ -384,6 +394,20 @@ func (s *Server) trends(w http.ResponseWriter, r *http.Request) {
 	if end < start {
 		start, end = end, start
 	}
+	writeJSON(w, trendKeywords(p, start, end)) // a bare array: the client expects no envelope
+}
+
+// trendKeywords ranks rising and declining terms for the window [start,end]
+// against the equal-length span immediately before it, clamped to the
+// corpus. It is the computation both the trends endpoint and the chat
+// overview describe movement from, so the two never disagree about what
+// "rising" means.
+//
+// Trends comes back sorted by lift descending, so the steepest declines are
+// the tail. Both ends ship: a decline is a finding, not a leftover, and a
+// term that fell to zero late docs is the sharpest one there is.
+func trendKeywords(p *pipeline.Project, start, end int) []TrendKeyword {
+	years := p.Analytics.Years
 	span := end - start + 1
 	late := analyze.Window{From: start, To: end}
 	early := analyze.Window{From: start - span, To: start - 1}
@@ -394,9 +418,6 @@ func (s *Server) trends(w http.ResponseWriter, r *http.Request) {
 		early.To = early.From
 	}
 
-	// Trends comes back sorted by lift descending, so the steepest declines are
-	// the tail. Both ends ship: a decline is a finding, not a leftover, and a
-	// term that fell to zero late docs is the sharpest one there is.
 	trends := p.Analytics.Trends(early, late)
 	out := make([]TrendKeyword, 0, 2*TrendsPerDirection)
 	emit := func(t analyze.Trend, dir string, rank int) {
@@ -421,7 +442,7 @@ func (s *Server) trends(w http.ResponseWriter, r *http.Request) {
 		}
 		emit(trends[i], "declining", rank)
 	}
-	writeJSON(w, out) // a bare array: the client expects no envelope
+	return out
 }
 
 // trajectory turns a term's per-year prevalence map into an ordered series.
@@ -541,12 +562,15 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.mu.RLock()
+	activeID := s.activeID
+	s.mu.RUnlock()
 	out := make([]ProjectSummary, 0, len(metas))
 	for _, m := range metas {
 		out = append(out, ProjectSummary{
 			ID: m.ID, Name: m.Name, Query: m.Query,
 			CreatedAt: m.CreatedAt.Format(time.RFC3339), Status: m.Status,
-			DocsIngested: m.DocsIngested,
+			DocsIngested: m.DocsIngested, Active: m.ID == activeID,
 		})
 	}
 	writeJSON(w, out)
@@ -615,6 +639,16 @@ type askPrep struct {
 // still the useful half of the answer.
 const noModelAnswer = "No local model is available, so no prose was generated. The retrieved sources below are the assembled context."
 
+// paperTitles collects each paper's title in position order, for pairing
+// against p.Corpus.Abstracts when calling rag.AssembleContext.
+func paperTitles(p *pipeline.Project) []string {
+	titles := make([]string, len(p.Papers))
+	for i := range p.Papers {
+		titles[i] = p.Papers[i].Title
+	}
+	return titles
+}
+
 // prepareAsk does everything up to generation. It is fast — retrieval and
 // context assembly are milliseconds against seconds of decoding — which is why
 // the streaming endpoint can show sources almost immediately.
@@ -635,10 +669,7 @@ func (s *Server) prepareAsk(w http.ResponseWriter, r *http.Request) (askPrep, bo
 		http.Error(w, "no corpus loaded", http.StatusServiceUnavailable)
 		return askPrep{}, false
 	}
-	titles := make([]string, len(p.Papers))
-	for i := range p.Papers {
-		titles[i] = p.Papers[i].Title
-	}
+	titles := paperTitles(p)
 	// One hop by default: hops=0 disables expansion entirely, which would leave
 	// the UI's expansion chips permanently empty.
 	hops := 1
@@ -716,24 +747,8 @@ func (s *Server) askStream(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	h := w.Header()
-	h.Set("Content-Type", "text/event-stream")
-	h.Set("Cache-Control", "no-cache")
-	h.Set("Connection", "keep-alive")
-	h.Set("X-Accel-Buffering", "no") // defeat proxy buffering, which would defeat the point
-	w.WriteHeader(http.StatusOK)
-
-	send := func(event string, payload any) bool {
-		b, err := json.Marshal(payload)
-		if err != nil {
-			return false
-		}
-		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b); err != nil {
-			return false
-		}
-		flusher.Flush()
-		return true
-	}
+	writeSSEHeaders(w)
+	send := sseSender(w, flusher)
 
 	send("sources", map[string]any{
 		"sources": prep.Sources, "tier": prep.Tier,
@@ -763,6 +778,36 @@ func (s *Server) askStream(w http.ResponseWriter, r *http.Request) {
 		log.Printf("api: ask stream ended early: %v", err)
 	}
 	send("done", map[string]any{"answer": answer, "generated": true, "truncated": err != nil})
+}
+
+// writeSSEHeaders opens an SSE response: no caching, no proxy buffering, and
+// the connection held open. Call it once, after any pre-stream validation has
+// already had the chance to answer with a normal status code instead.
+func writeSSEHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("Connection", "keep-alive")
+	h.Set("X-Accel-Buffering", "no") // defeat proxy buffering, which would defeat the point
+	w.WriteHeader(http.StatusOK)
+}
+
+// sseSender returns a closure that writes one named SSE event and flushes it.
+// The bool result reports whether the write reached the client; callers that
+// stream tokens in a loop may ignore it, since an error here means the peer
+// is already gone and the next write will fail the same way.
+func sseSender(w http.ResponseWriter, flusher http.Flusher) func(event string, payload any) bool {
+	return func(event string, payload any) bool {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
 }
 
 func atoiDefault(s string, def int) int {

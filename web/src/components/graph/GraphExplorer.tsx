@@ -6,7 +6,6 @@ import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
-import { SectionShell } from "@/components/layout/SectionShell";
 import { API_BASE } from "@/lib/config";
 import { useEnsureGraphSnapshot } from "@/lib/useEnsureGraphSnapshot";
 import { useAppStore } from "@/store";
@@ -34,11 +33,14 @@ function matchNodes(nodes: readonly GraphNode[], input: string): GraphNode[] {
 }
 
 /**
- * /graph: the loaded snapshot as a navigable node-link diagram. Focus lives in
- * `?node=` so a view is shareable; it stays local rather than going through the
- * store's selectNode, which would also fetch the wiki document.
+ * The active project's snapshot as a navigable node-link diagram, without a
+ * page shell; rendered by the project page's Graph tab once that project is
+ * active, so it only ever shows that project's nodes and edges. Focus lives in `?node=`
+ * (other query params are kept) so a view is shareable; it stays local rather
+ * than going through the store's selectNode, which would also fetch the wiki
+ * document. Render inside a Suspense boundary: it reads useSearchParams.
  */
-export function GraphSection() {
+export function GraphExplorer() {
   const params = useSearchParams();
   const nodes = useAppStore((s) => s.nodes);
   const edges = useAppStore((s) => s.edges);
@@ -69,6 +71,7 @@ export function GraphSection() {
   const matchCount = input && input !== focusNode?.label ? matchNodes(nodes, input).length : null;
   const outCount = focusNode ? visibleLinks(adjacency, focusNode.id, "out", mode, relations).length : 0;
   const inCount = focusNode ? visibleLinks(adjacency, focusNode.id, "in", mode, relations).length : 0;
+  const mutualCount = focusNode ? visibleLinks(adjacency, focusNode.id, "mutual", mode, relations).length : 0;
 
   const focus = (id: string | null) => {
     setFocusId(id);
@@ -102,12 +105,7 @@ export function GraphSection() {
   }
 
   return (
-    <SectionShell
-      id="graph"
-      eyebrow="Relationship graph"
-      title="Graph"
-      description="Focus a paper or concept to see what it points to and what points to it."
-    >
+    <>
       <div className="flex flex-col overflow-hidden rounded-xl bg-white ring-line">
         <div className="flex flex-wrap items-end gap-x-6 gap-y-3 border-b border-line p-4">
           <div className="flex min-w-[min(260px,100%)] flex-1 flex-col gap-1">
@@ -148,13 +146,21 @@ export function GraphSection() {
               size="small"
               exclusive
               value={mode}
+              disabled={!focusNode}
               aria-labelledby="graph-direction-label"
+              aria-describedby={focusNode ? undefined : "graph-direction-hint"}
               onChange={(_, v: Direction | null) => v && setMode(v)}
             >
               <ToggleButton value="all">All</ToggleButton>
               <ToggleButton value="out">Out</ToggleButton>
               <ToggleButton value="in">In</ToggleButton>
+              <ToggleButton value="mutual">Mutual</ToggleButton>
             </ToggleButtonGroup>
+            {focusNode ? null : (
+              <span id="graph-direction-hint" className="text-[12px] text-ink-3">
+                Select a node to filter by direction
+              </span>
+            )}
           </div>
 
           <div className="flex flex-col gap-1">
@@ -236,9 +242,9 @@ export function GraphSection() {
         </div>
       </div>
       <p role="status" className="sr-only">
-        {focusNode ? `${focusNode.label}: ${outCount} out, ${inCount} in` : ""}
+        {focusNode ? `${focusNode.label}: ${outCount} out, ${inCount} in, ${mutualCount} mutual` : ""}
       </p>
-    </SectionShell>
+    </>
   );
 }
 

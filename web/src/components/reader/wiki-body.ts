@@ -53,7 +53,7 @@ function shortenAuthors(authors: string): string {
 }
 
 const SKIP_LINE = /^\s*(#|-|\||>)/;
-const PROTECTED = /\[\[[^\]]*\]\]|`[^`]*`/g;
+const PROTECTED = /\[\[[^\]]*\]\]|`[^`]*`|\$\$[^$]*\$\$|\$[^$\n]*\$/g;
 
 /**
  * Wraps occurrences of concept-node labels in [[…]] so WikiPane's existing

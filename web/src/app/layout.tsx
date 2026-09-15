@@ -6,6 +6,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { googleSans, inter, plexMono } from "./fonts";
 import { Providers } from "./providers";
 
+import "katex/dist/katex.min.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

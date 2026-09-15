@@ -2,7 +2,6 @@
 
 import AutoGraphOutlined from "@mui/icons-material/AutoGraphOutlined";
 import FolderOutlined from "@mui/icons-material/FolderOutlined";
-import HubOutlined from "@mui/icons-material/HubOutlined";
 import MenuBookOutlined from "@mui/icons-material/MenuBookOutlined";
 import SettingsOutlined from "@mui/icons-material/SettingsOutlined";
 import TravelExploreOutlined from "@mui/icons-material/TravelExploreOutlined";
@@ -10,6 +9,8 @@ import Typography from "@mui/material/Typography";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ComponentType, ReactNode } from "react";
+
+import { HarvestNotifier } from "@/components/ingestion/HarvestNotifier";
 
 import { AppHeader } from "./AppHeader";
 
@@ -27,7 +28,6 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       { href: "/", label: "Harvest", icon: TravelExploreOutlined },
       { href: "/trends", label: "Trends", icon: AutoGraphOutlined },
       { href: "/reader", label: "Reader", icon: MenuBookOutlined },
-      { href: "/graph", label: "Graph", icon: HubOutlined },
     ],
   },
   {
@@ -91,6 +91,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <AppHeader />
         <main className="relative min-w-0 flex-1 overflow-y-auto">{children}</main>
+        <HarvestNotifier />
       </div>
     </div>
   );

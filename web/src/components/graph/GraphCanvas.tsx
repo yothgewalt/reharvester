@@ -74,7 +74,7 @@ const CONTEXT_EDGE = `${color.ink3}BF`;
 const NO_ROLES: FocusRoles = { nodes: new Map(), edges: new Map() };
 
 // The graph (with its settled layout) outlives the component, so returning to
-// /graph after client navigation renders instantly instead of re-laying out.
+// the project's Graph tab renders instantly instead of re-laying out.
 const cache: { graph: Graph | null; settled: boolean } = { graph: null, settled: false };
 
 function cachedGraph(create: () => Graph): Graph {
@@ -87,7 +87,7 @@ function markSettled(settled: boolean) {
 }
 
 /** Adds what the store gained since the last sync; clears first if the cached
- *  graph holds nodes the store no longer has (a different corpus). */
+ *  graph holds nodes or edges the store no longer has (a different project). */
 function syncGraph(
   graph: Graph,
   nodes: readonly GraphNode[],
@@ -95,8 +95,9 @@ function syncGraph(
   adjacency: ReadonlyMap<string, Adjacency>,
 ): { changed: boolean; addedNodes: number } {
   const ids = new Set(nodes.map((n) => n.id));
+  const edgeIds = new Set(edges.map((e) => e.id));
   let changed = false;
-  if (graph.someNode((id) => !ids.has(id))) {
+  if (graph.someNode((id) => !ids.has(id)) || graph.someEdge((id) => !edgeIds.has(id))) {
     graph.clear();
     markSettled(false);
     changed = true;
@@ -143,7 +144,7 @@ function nearPlaced(
   seeds: Map<string, { x: number; y: number }>,
 ) {
   const a = adjacency.get(id);
-  const anchor = [...(a?.out ?? []), ...(a?.in ?? [])].find((l) => graph.hasNode(l.other));
+  const anchor = [...(a?.out ?? []), ...(a?.in ?? []), ...(a?.mutual ?? [])].find((l) => graph.hasNode(l.other));
   if (!anchor) return seeds.get(id)!;
   const { x, y } = graph.getNodeAttributes(anchor.other);
   return { x: x + Math.random() - 0.5, y: y + Math.random() - 0.5 };

@@ -27,8 +27,8 @@ prose. With neither, the system runs at tier T2 and the header says so; nothing 
 Next.js 16 (App Router, Turbopack) · TypeScript 5.9 (pinned — TS7 breaks Next 16.2) ·
 MUI v9 + Tailwind v4 (CSS cascade layers, `mui` below `utilities`) · Zustand ·
 react-markdown + remark-wiki-link + rehype-raw. sigma.js 3 + graphology +
-ForceAtlas2 (in a Web Worker) draw `/graph` in WebGL; they are dynamic-imported there
-only, so no other route loads them. The reader stays plain DOM and the field map inline
+ForceAtlas2 (in a Web Worker) draw a project's Graph tab in WebGL; they are dynamic-imported there
+only, so no other view loads them. The reader stays plain DOM and the field map inline
 SVG over ~21 nodes, which is why both stay fast at corpus scale.
 
 Design tokens follow the plane.so taste in the repo-root `CLAUDE.md` (Google Sans 430
@@ -37,10 +37,12 @@ accent #006399 as text only).
 
 ## Layout
 
-AppShell: persistent sidebar (Workspace: Harvest `/`, Trends `/trends`, Reader
-`/reader`, Graph `/graph`, Projects `/projects`) + header with live crawl chip, status and tier.
-The scheduler lives as a tab inside a project, not as its own route. Project detail is
-`/projects/detail?id=…`, the reader is `/reader?doc=…` and the graph `/graph?node=…` — a static export cannot
+AppShell: persistent sidebar (Workspace: Projects `/projects`, Harvest `/`, Trends `/trends`,
+Reader `/reader`; System: Settings `/settings`) + header with live crawl chip, status and tier.
+A project's tabs are Reader, Graph, Chat, Crawl log and Scheduler — the graph, the read-only
+research chat and the scheduler are not routes of their own; opening a project makes it the
+active corpus. Project detail is `/projects/detail?id=…` (`&tab=chat` opens a tab, `&pin=<docId>`
+starts a chat about that paper, graph focus adds `&node=…`) and the reader is `/reader?doc=…` — a static export cannot
 pre-render a runtime-minted id, so ids travel in the query string behind a `Suspense`
 boundary. Zustand state is client-global, so crawls and selections survive route
 changes; `[[wikilinks]]` select in place rather than navigating away.

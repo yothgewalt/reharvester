@@ -1,7 +1,7 @@
 import { API_BASE } from "@/lib/config";
 import type {
-  AskRequest,
-  AskResponse,
+  ActivationStatus,
+  ChatRequest,
   Community,
   CommunityLink,
   GapReport,
@@ -23,9 +23,6 @@ import { reportBackendFailure } from "./failure-bus";
 import { ApiError, type ApiTransport } from "./transport";
 
 const TIMEOUT_MS = 10_000;
-// Generation is allowed 60 s server-side (internal/httpapi/server.go), so an ask
-// on the default budget would otherwise abort and report the backend as down.
-const ASK_TIMEOUT_MS = 65_000;
 // The server gives keyword generation 18 s (internal/httpapi/keywords.go).
 const KEYWORDS_TIMEOUT_MS = 20_000;
 
@@ -121,7 +118,6 @@ export function createHttpTransport(): ApiTransport {
     listCommunities: () => getJson<Community[]>("/api/v1/communities"),
     listGapPairs: () => getJson<GapReport>("/api/v1/gaps/pairs"),
     listCommunityLinks: () => getJson<CommunityLink[]>("/api/v1/communities/links"),
-    ask: (req: AskRequest) => postJson<AskResponse>("/api/v1/ask", req, ASK_TIMEOUT_MS),
     randomKeywords: async (field: string) => {
       const path = `/api/v1/keywords/random?field=${encodeURIComponent(field)}`;
       const res = await request(path, undefined, KEYWORDS_TIMEOUT_MS);
@@ -129,13 +125,13 @@ export function createHttpTransport(): ApiTransport {
       return Array.isArray(body.keywords) ? body.keywords.filter((k): k is string => typeof k === "string") : [];
     },
 
-    askStream: async (req, handlers, signal) => {
+    chatStream: async (req: ChatRequest, handlers, signal) => {
       // No AbortSignal.timeout here: the stream is alive as long as tokens keep
       // arriving, and generation legitimately runs for minutes on a slow CPU.
       // The caller aborts instead, which is what a new question does.
       let res: Response;
       try {
-        res = await fetch(`${API_BASE}/api/v1/ask/stream`, {
+        res = await fetch(`${API_BASE}/api/v1/chat/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(req),
@@ -144,10 +140,12 @@ export function createHttpTransport(): ApiTransport {
       } catch (err) {
         if ((err as Error)?.name === "AbortError") return;
         reportBackendFailure();
-        throw new ApiError(0, "cannot reach the local API", "/api/v1/ask/stream");
+        throw new ApiError(0, "cannot reach the local API", "/api/v1/chat/stream");
       }
       if (!res.ok) {
-        throw new ApiError(res.status, await res.text().catch(() => res.statusText), "/api/v1/ask/stream");
+        if (res.status >= 500) reportBackendFailure();
+        const body = res.status >= 400 && res.status < 500 ? await res.json().catch(() => undefined) : undefined;
+        throw new ApiError(res.status, `${res.status} ${res.statusText}`, "/api/v1/chat/stream", body);
       }
       try {
         await readSSE(res, (event, data) => {
@@ -158,11 +156,9 @@ export function createHttpTransport(): ApiTransport {
             case "token":
               handlers.onToken(JSON.parse(data).text as string);
               break;
-            case "done": {
-              const d = JSON.parse(data);
-              handlers.onDone(d.answer as string, Boolean(d.generated));
+            case "done":
+              handlers.onDone(JSON.parse(data));
               break;
-            }
             case "error":
               handlers.onError(JSON.parse(data).message as string);
               break;
@@ -207,6 +203,10 @@ export function createHttpTransport(): ApiTransport {
     recalculateTrends: ([start, end]: [number, number]) =>
       getJson<TrendKeyword[]>(`/api/v1/trends/recalculate?start=${start}&end=${end}`),
     listProjects: () => getJson<ProjectSummary[]>("/api/v1/projects"),
+    activateProject: (id: string) =>
+      postJson<ActivationStatus>(`/api/v1/projects/${encodeURIComponent(id)}/activate`, {}),
+    getActivation: (id: string) =>
+      getJson<ActivationStatus>(`/api/v1/projects/${encodeURIComponent(id)}/activation`),
     listJobs: () => getJson<SchedulerProfile[]>("/api/v1/jobs"),
     getSettings: () => getJson<SettingsView>("/api/v1/settings"),
     patchSettings: (patch: SettingsPatch) => patchJson<SettingsView>("/api/v1/settings", patch),

@@ -5,16 +5,18 @@ import { useEffect, useRef } from "react";
 import { useEnsureGraphSnapshot } from "@/lib/useEnsureGraphSnapshot";
 import { useAppStore } from "@/store";
 
-import { AskRail } from "./AskRail";
+import { ChatShortcut } from "./ChatShortcut";
 import { CommunityRail } from "./CommunityRail";
 import { PaperReader } from "./PaperReader";
 
 /**
  * Three panes over one corpus: communities, the selected paper, and the ask
  * surface. Layout-agnostic — it fills its container, so it works both as the
- * /reader page and as a tab inside a project.
+ * /reader page and as a tab inside a project. Inside a project, pass
+ * `onAskAboutPaper` to switch to that project's Chat tab in place; without it
+ * the shortcut navigates to the active project's Chat tab.
  */
-export function ReaderWorkbench() {
+export function ReaderWorkbench({ onAskAboutPaper }: { onAskAboutPaper?: (docId: string) => void } = {}) {
   const params = useSearchParams();
   const loadCommunities = useAppStore((s) => s.loadCommunities);
   const selectCommunity = useAppStore((s) => s.selectCommunity);
@@ -62,10 +64,10 @@ export function ReaderWorkbench() {
       </article>
       <div className="hidden bg-line lg:block" />
       <section
-        aria-labelledby="ask-heading"
+        aria-labelledby="chat-shortcut-heading"
         className="relative min-h-0 max-h-[720px] overflow-y-auto border-t border-line lg:border-t-0"
       >
-        <AskRail />
+        <ChatShortcut onAsk={onAskAboutPaper} />
       </section>
     </div>
   );

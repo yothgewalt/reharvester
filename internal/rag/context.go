@@ -135,6 +135,12 @@ func Answer(ctx context.Context, o *Ollama, question string, docs []ContextDoc) 
 
 // answerPrompt lays the numbered sources out for citation.
 func answerPrompt(question string, docs []ContextDoc) string {
+	return "Sources:\n\n" + sourcesBlock(docs) + "Question: " + question
+}
+
+// sourcesBlock numbers each document for inline citation as [1], [2] and so
+// on — the shared rendering answerPrompt and the chat prompt both build on.
+func sourcesBlock(docs []ContextDoc) string {
 	var b strings.Builder
 	for i, d := range docs {
 		b.WriteString("[")
@@ -145,5 +151,5 @@ func answerPrompt(question string, docs []ContextDoc) string {
 		b.WriteString(d.Abstract)
 		b.WriteString("\n\n")
 	}
-	return "Sources:\n\n" + b.String() + "Question: " + question
+	return b.String()
 }

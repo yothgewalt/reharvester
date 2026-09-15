@@ -125,6 +125,8 @@ type ProjectSummary struct {
 	CreatedAt    string `json:"createdAt"`
 	Status       string `json:"status"`
 	DocsIngested int    `json:"docsIngested"`
+	// Active marks the project every corpus endpoint currently serves.
+	Active bool `json:"active"`
 }
 
 type GapPositions struct {

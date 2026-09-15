@@ -46,6 +46,7 @@ export function ProjectRow({ project }: { project: Project }) {
         <span className="truncate text-[13px] text-ink-2">{project.query}</span>
       </div>
       <div className="flex shrink-0 items-center gap-3">
+        {project.active ? <Chip size="small" label="Active" className="bg-slab text-ink-inverse" /> : null}
         <ProjectStatusChip status={project.status} />
         <span className="font-mono text-[13px] text-ink-2">{project.docsIngested} docs</span>
         <span className="w-24 text-right text-[13px] text-ink-3">

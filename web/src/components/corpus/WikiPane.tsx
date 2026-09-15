@@ -2,11 +2,10 @@
 import Alert from "@mui/material/Alert";
 import Typography from "@mui/material/Typography";
 import { useMemo } from "react";
-import ReactMarkdown, { type Components, type Options } from "react-markdown";
-import rehypeRaw from "rehype-raw";
-import remarkGfm from "remark-gfm";
+import type { Components, Options } from "react-markdown";
 import wikiLinkPlugin from "remark-wiki-link";
 
+import { MarkdownProse, proseRemarkPlugins } from "@/lib/markdown";
 import { useAppStore } from "@/store";
 
 
@@ -18,7 +17,7 @@ const slug = (s: string) =>
     .replace(/^-|-$/g, "");
 
 const remarkPlugins: Options["remarkPlugins"] = [
-  remarkGfm,
+  ...proseRemarkPlugins,
   [
     wikiLinkPlugin,
     {
@@ -30,8 +29,6 @@ const remarkPlugins: Options["remarkPlugins"] = [
     },
   ],
 ];
-
-const rehypePlugins: Options["rehypePlugins"] = [rehypeRaw];
 
 
 export function WikiPane({ markdown }: { markdown?: string } = {}) {
@@ -109,13 +106,9 @@ export function WikiPane({ markdown }: { markdown?: string } = {}) {
 
   return (
     <article className="wiki-prose">
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
-        components={components}
-      >
+      <MarkdownProse remarkPlugins={remarkPlugins} components={components}>
         {markdown ?? wikiDoc.markdown}
-      </ReactMarkdown>
+      </MarkdownProse>
     </article>
   );
 }

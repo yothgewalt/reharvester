@@ -40,17 +40,38 @@ const edges = [
   edge("a", "a", "similar-to"),
 ];
 
-test("mutual relations are listed both ways at both ends; directed ones only source→target", () => {
+test("mutual relations are listed only under mutual at both ends; directed ones only source→target", () => {
   const adj = buildAdjacency(edges);
   const ids = (links: { other: string }[]) => links.map((l) => l.other);
 
-  expect(ids(adj.get("a")!.out)).toEqual(["d", "c", "b"]);
-  expect(ids(adj.get("a")!.in)).toEqual(["concept", "d", "d", "b"]);
-  expect(ids(adj.get("b")!.out)).toEqual(["a"]);
-  expect(ids(adj.get("b")!.in)).toEqual(["a"]);
+  expect(ids(adj.get("a")!.out)).toEqual(["c"]);
+  expect(ids(adj.get("a")!.in)).toEqual(["concept", "d"]);
+  expect(ids(adj.get("a")!.mutual)).toEqual(["d", "b"]);
+  expect(ids(adj.get("b")!.out)).toEqual([]);
+  expect(ids(adj.get("b")!.in)).toEqual([]);
+  expect(ids(adj.get("b")!.mutual)).toEqual(["a"]);
   expect(ids(adj.get("c")!.out)).toEqual([]);
   expect(ids(adj.get("c")!.in)).toEqual(["a"]);
   expect(ids(adj.get("concept")!.out)).toEqual(["a"]);
+});
+
+test("In, Out and Mutual modes never leak each other's edges", () => {
+  const adj = buildAdjacency(edges);
+  const rels = (links: { edge: GraphEdge }[]) => links.map((l) => l.edge.relation);
+
+  expect(rels(visibleLinks(adj, "a", "in", "in", all))).toEqual(["appears-in", "nearest-to"]);
+  expect(visibleLinks(adj, "a", "out", "in", all)).toEqual([]);
+  expect(visibleLinks(adj, "a", "mutual", "in", all)).toEqual([]);
+  expect(rels(visibleLinks(adj, "a", "mutual", "mutual", all))).toEqual(["co-authored-with", "similar-to"]);
+  expect(visibleLinks(adj, "a", "in", "mutual", all)).toEqual([]);
+
+  for (const mode of ["in", "out"] as const) {
+    const roles = focusRoles(adj, "a", mode, all);
+    expect([...roles.edges.values()].every((r) => r === mode)).toBe(true);
+    expect([...roles.nodes.values()].every((r) => r === mode)).toBe(true);
+  }
+  const mutual = focusRoles(adj, "a", "mutual", all);
+  expect([...mutual.edges.keys()].sort()).toEqual(["co-authored-with:a->d", "similar-to:a->b"]);
 });
 
 test("lists are sorted heaviest first", () => {

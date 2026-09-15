@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { WikiPane } from "@/components/corpus/WikiPane";
 import { useAppStore } from "@/store";
 
+import { MathText } from "./MathText";
 import { linkifyConcepts, parseWikiBody } from "./wiki-body";
 
 const NEIGHBOUR_CAP = 12;
@@ -74,7 +75,7 @@ export function PaperReader() {
     <div className="flex flex-col gap-6 p-6">
       <header className="flex flex-col gap-2">
         <Typography variant="h5" component="h1" id="reader-title" tabIndex={-1}>
-          {node.label}
+          <MathText text={node.label} />
         </Typography>
         <p className="m-0 min-h-5 font-mono text-[13px] text-ink-3">{meta.join(" · ")}</p>
       </header>
@@ -94,7 +95,9 @@ export function PaperReader() {
                   onClick={() => selectNode(n.id, n.id)}
                   className="flex w-full items-center justify-between gap-4 rounded-md px-3 py-2 text-left text-[14px] text-ink-1 transition-colors hover:bg-bg-subtle"
                 >
-                  <span className="truncate">{n.label}</span>
+                  <span className="truncate">
+                    <MathText text={n.label} />
+                  </span>
                   <span className="shrink-0 font-mono text-[12px] text-accent">
                     <span className="sr-only">cosine similarity </span>
                     cos {n.cos.toFixed(2)}

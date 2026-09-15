@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { createAskSlice, type AskSlice } from "./ask-slice";
+import { createActivationSlice, type ActivationSlice } from "./activation-slice";
 import { createCrawlSlice, type CrawlSlice } from "./crawl-slice";
 import { createGraphSlice, type GraphSlice } from "./graph-slice";
 import { createSchedulerSlice, type SchedulerSlice } from "./scheduler-slice";
@@ -15,16 +15,16 @@ export type AppState = SystemSlice &
   WikiSlice &
   TrendsSlice &
   SchedulerSlice &
-  AskSlice &
-  SettingsSlice;
+  SettingsSlice &
+  ActivationSlice;
 
 export const useAppStore = create<AppState>()((...a) => ({
+  ...createActivationSlice(...a),
   ...createSystemSlice(...a),
   ...createCrawlSlice(...a),
   ...createGraphSlice(...a),
   ...createWikiSlice(...a),
   ...createTrendsSlice(...a),
   ...createSchedulerSlice(...a),
-  ...createAskSlice(...a),
   ...createSettingsSlice(...a),
 }));

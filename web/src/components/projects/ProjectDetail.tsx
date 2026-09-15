@@ -15,8 +15,10 @@ import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { ProjectChat } from "@/components/chat/ProjectChat";
+import { GraphExplorer } from "@/components/graph/GraphExplorer";
 import { CrawlLogTerminal } from "@/components/ingestion/CrawlLogTerminal";
 import { ReaderWorkbench } from "@/components/reader/ReaderWorkbench";
 import { SectionShell } from "@/components/layout/SectionShell";
@@ -24,10 +26,16 @@ import { ActiveCrawlers } from "@/components/scheduler/ActiveCrawlers";
 import { SchedulerForm } from "@/components/scheduler/SchedulerForm";
 import { formatRelative } from "@/lib/relative-time";
 import { useAppStore } from "@/store";
+import { useChatStore } from "@/store/chat";
 import { useProjectsStore } from "@/store/projects";
 import type { ProjectAction } from "@/types/domain";
 
-type TabKey = "reader" | "log" | "scheduler";
+const TABS = ["reader", "graph", "chat", "log", "scheduler"] as const;
+type TabKey = (typeof TABS)[number];
+
+export function isProjectTab(value: string): value is TabKey {
+  return (TABS as readonly string[]).includes(value);
+}
 
 const ACTIONS: { value: ProjectAction; label: string }[] = [
   { value: "add", label: "Add" },
@@ -37,13 +45,52 @@ const ACTIONS: { value: ProjectAction; label: string }[] = [
 ];
 
 
-export function ProjectDetail({ id }: { id: string }) {
+/**
+ * `initialTab` and `pinDocId` come from the URL (`&tab=`, `&pin=`; see
+ * lib/project-links.ts). A pin opens a new Chat thread about that paper once
+ * the project is known, then both params are dropped from the address bar.
+ */
+export function ProjectDetail({
+  id,
+  initialTab,
+  pinDocId,
+}: {
+  id: string;
+  initialTab?: TabKey;
+  pinDocId?: string;
+}) {
   const project = useProjectsStore((s) => s.projects.find((p) => p.id === id));
   const isCrawlActive = useAppStore((s) => s.isCrawlActive);
   const startProjectAction = useAppStore((s) => s.startProjectAction);
-  const [tab, setTab] = useState<TabKey>("reader");
+  const newThread = useChatStore((s) => s.newThread);
+  const [tab, setTab] = useState<TabKey>(pinDocId ? "chat" : (initialTab ?? "reader"));
   const [menuOpen, setMenuOpen] = useState(false);
   const [actionButton, setActionButton] = useState<HTMLButtonElement | null>(null);
+  const activation = useAppStore((s) => s.activation);
+  const activateProject = useAppStore((s) => s.activateProject);
+  const isComplete = project?.status === "complete";
+
+  useEffect(() => {
+    if (isComplete) void activateProject(id);
+  }, [id, isComplete, activateProject]);
+
+  const urlHandled = useRef(false);
+  const hasProject = project !== undefined;
+  useEffect(() => {
+    if (urlHandled.current || !hasProject) return;
+    urlHandled.current = true;
+    if (pinDocId) newThread(id, { pinnedDocId: pinDocId });
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("tab") && !url.searchParams.has("pin")) return;
+    url.searchParams.delete("tab");
+    url.searchParams.delete("pin");
+    window.history.replaceState(null, "", url);
+  }, [hasProject, id, pinDocId, newThread]);
+
+  const askAboutPaper = (docId: string) => {
+    newThread(id, { pinnedDocId: docId });
+    setTab("chat");
+  };
 
   if (!project) {
     return (
@@ -57,6 +104,37 @@ export function ProjectDetail({ id }: { id: string }) {
       </SectionShell>
     );
   }
+
+  const corpusView = (view: ReactNode) => {
+    if (!isComplete) {
+      return (
+        <Typography variant="body2" className="text-ink-2">
+          This project has no graph yet
+          {project.status === "crawling" ? " — the crawl is still running." : "."}
+        </Typography>
+      );
+    }
+    if (activation.state === "error" && activation.id === project.id) {
+      return (
+        <div role="alert" className="flex flex-wrap items-center gap-3">
+          <Typography variant="body2" className="text-ink">
+            {activation.message}
+          </Typography>
+          <Button size="small" variant="outlined" onClick={() => void activateProject(project.id)}>
+            Retry
+          </Button>
+        </div>
+      );
+    }
+    if (activation.id !== project.id || activation.state === "loading") {
+      return (
+        <p role="status" className="m-0 text-sm text-ink-2">
+          Loading this project… a stale graph is rebuilt first, which can take a while.
+        </p>
+      );
+    }
+    return view;
+  };
 
   return (
     <SectionShell
@@ -85,6 +163,8 @@ export function ProjectDetail({ id }: { id: string }) {
           sx={{ "& .MuiTab-root": { p: 0 } }}
         >
           <Tab value="reader" label="Reader" />
+          <Tab value="graph" label="Graph" />
+          <Tab value="chat" label="Chat" />
           <Tab value="log" label="Crawl log" />
           <Tab
             value="scheduler"
@@ -143,7 +223,9 @@ export function ProjectDetail({ id }: { id: string }) {
         </Popper>
       </div>
 
-      {tab === "reader" ? <ReaderWorkbench /> : null}
+      {tab === "reader" ? corpusView(<ReaderWorkbench onAskAboutPaper={askAboutPaper} />) : null}
+      {tab === "graph" ? corpusView(<GraphExplorer />) : null}
+      {tab === "chat" ? corpusView(<ProjectChat projectId={project.id} />) : null}
       {tab === "log" ? (
         project.logSnapshot.length > 0 ? (
           <CrawlLogTerminal entries={project.logSnapshot} />

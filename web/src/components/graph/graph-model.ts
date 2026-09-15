@@ -1,6 +1,6 @@
 import type { GraphEdge, GraphNode, GraphRelation } from "@/types/domain";
 
-export type Direction = "all" | "out" | "in";
+export type Direction = "all" | "out" | "in" | "mutual";
 export type Role = "out" | "in" | "mutual";
 
 export const RELATIONS: readonly GraphRelation[] = [
@@ -17,7 +17,7 @@ export const RELATION_LABEL: Record<GraphRelation, string> = {
   "appears-in": "Appears in",
 };
 
-/** Symmetric relations: listed under both Out and In at both endpoints. */
+/** Symmetric relations: listed under Mutual at both endpoints, never under Out or In. */
 export const MUTUAL: ReadonlySet<GraphRelation> = new Set(["similar-to", "co-authored-with"]);
 
 export interface Link {
@@ -28,7 +28,11 @@ export interface Link {
 export interface Adjacency {
   out: Link[];
   in: Link[];
+  mutual: Link[];
 }
+
+const LINK_DIRECTIONS = ["out", "in", "mutual"] as const;
+export type LinkDirection = (typeof LINK_DIRECTIONS)[number];
 
 /** Lists are sorted by weight, heaviest first. Build once per edges array. */
 export function buildAdjacency(edges: readonly GraphEdge[]): Map<string, Adjacency> {
@@ -36,23 +40,23 @@ export function buildAdjacency(edges: readonly GraphEdge[]): Map<string, Adjacen
   const at = (id: string) => {
     let a = adj.get(id);
     if (!a) {
-      a = { out: [], in: [] };
+      a = { out: [], in: [], mutual: [] };
       adj.set(id, a);
     }
     return a;
   };
   for (const edge of edges) {
     if (edge.source === edge.target) continue;
-    at(edge.source).out.push({ edge, other: edge.target });
-    at(edge.target).in.push({ edge, other: edge.source });
     if (MUTUAL.has(edge.relation)) {
-      at(edge.source).in.push({ edge, other: edge.target });
-      at(edge.target).out.push({ edge, other: edge.source });
+      at(edge.source).mutual.push({ edge, other: edge.target });
+      at(edge.target).mutual.push({ edge, other: edge.source });
+    } else {
+      at(edge.source).out.push({ edge, other: edge.target });
+      at(edge.target).in.push({ edge, other: edge.source });
     }
   }
   for (const a of adj.values()) {
-    a.out.sort(byWeight);
-    a.in.sort(byWeight);
+    for (const dir of LINK_DIRECTIONS) a[dir].sort(byWeight);
   }
   return adj;
 }
@@ -64,7 +68,7 @@ function byWeight(a: Link, b: Link): number {
 export function visibleLinks(
   adj: ReadonlyMap<string, Adjacency>,
   id: string,
-  dir: "out" | "in",
+  dir: LinkDirection,
   mode: Direction,
   relations: ReadonlySet<GraphRelation>,
 ): Link[] {
@@ -78,7 +82,7 @@ export interface FocusRoles {
 }
 
 /** Neighbours and edges of `id` under the current filters. A neighbour reached
- *  both ways (e.g. nearest-to plus co-authored-with) is "mutual". */
+ *  more than one way (e.g. nearest-to plus co-authored-with) is "mutual". */
 export function focusRoles(
   adj: ReadonlyMap<string, Adjacency>,
   id: string,
@@ -87,9 +91,9 @@ export function focusRoles(
 ): FocusRoles {
   const nodes = new Map<string, Role>();
   const edges = new Map<string, Role>();
-  for (const dir of ["out", "in"] as const) {
+  for (const dir of LINK_DIRECTIONS) {
     for (const { edge, other } of visibleLinks(adj, id, dir, mode, relations)) {
-      const role: Role = MUTUAL.has(edge.relation) ? "mutual" : dir;
+      const role: Role = dir;
       edges.set(edge.id, role);
       const prev = nodes.get(other);
       nodes.set(other, prev && prev !== role ? "mutual" : role);

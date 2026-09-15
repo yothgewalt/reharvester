@@ -53,6 +53,13 @@ test("linkify wraps each concept once only", () => {
   expect(out.match(/\[\[/g)?.length).toBe(2);
 });
 
+test("linkify never wraps text inside $…$ math", () => {
+  const out = linkifyConcepts("Based on the $\\mathfrak{osp}(1|2)$ superalgebra and superalgebra theory.", ["superalgebra", "osp"]);
+  expect(out).toContain("$\\mathfrak{osp}(1|2)$");
+  expect(out).toContain("[[superalgebra]]");
+  expect(out).not.toContain("[[osp]]");
+});
+
 test("linkify skips headings, list items and fenced spans", () => {
   const out = linkifyConcepts("- BM25 in a list\n# BM25 heading\n`BM25` in code", ["BM25"]);
   expect(out).not.toContain("[[BM25]]");

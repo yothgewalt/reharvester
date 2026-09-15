@@ -307,7 +307,14 @@ func (o *Ollama) embedBatch(ctx context.Context, texts []string) ([][]float32, e
 	return out.Embeddings, nil
 }
 
-// GenerateStream asks the local model for prose and delivers it as it is
+// Message is one turn of a chat conversation: role is "system", "user" or
+// "assistant".
+type Message struct {
+	Role    string
+	Content string
+}
+
+// ChatStream sends a full message list and delivers the reply as it is
 // written, calling onToken for each chunk and returning the whole text.
 //
 // Generation runs at roughly the model's decode rate — tens of milliseconds
@@ -318,14 +325,15 @@ func (o *Ollama) embedBatch(ctx context.Context, texts []string) ([][]float32, e
 // that only want the finished string.
 //
 // onToken runs on this goroutine, in order, and must not block.
-func (o *Ollama) GenerateStream(ctx context.Context, system, prompt string, onToken func(string)) (string, error) {
+func (o *Ollama) ChatStream(ctx context.Context, msgs []Message, onToken func(string)) (string, error) {
+	wire := make([]map[string]string, len(msgs))
+	for i, m := range msgs {
+		wire[i] = map[string]string{"role": m.Role, "content": m.Content}
+	}
 	body, err := json.Marshal(map[string]any{
-		"model":  o.ChatModel,
-		"stream": true,
-		"messages": []map[string]string{
-			{"role": "system", "content": system},
-			{"role": "user", "content": prompt},
-		},
+		"model":    o.ChatModel,
+		"stream":   true,
+		"messages": wire,
 	})
 	if err != nil {
 		return "", err
@@ -378,6 +386,16 @@ func (o *Ollama) GenerateStream(ctx context.Context, system, prompt string, onTo
 		}
 	}
 	return sb.String(), nil
+}
+
+// GenerateStream is ChatStream for the common case of one system prompt and
+// one user turn — the shorter way to say the same thing when there is no
+// conversation history to carry.
+func (o *Ollama) GenerateStream(ctx context.Context, system, prompt string, onToken func(string)) (string, error) {
+	return o.ChatStream(ctx, []Message{
+		{Role: "system", Content: system},
+		{Role: "user", Content: prompt},
+	}, onToken)
 }
 
 // Generate asks the local model for prose. Callers must treat an error as

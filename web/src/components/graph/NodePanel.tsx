@@ -5,6 +5,7 @@ import Link from "next/link";
 import { type ReactNode, type RefObject, useState } from "react";
 
 import { moveOptionFocus, Row } from "@/components/reader/CommunityRail";
+import { MathText } from "@/components/reader/MathText";
 import type { GraphNode, GraphRelation } from "@/types/domain";
 
 import type { Hover } from "./GraphCanvas";
@@ -12,6 +13,7 @@ import {
   type Adjacency,
   type Direction,
   type Link as GraphLink,
+  type LinkDirection,
   RELATION_LABEL,
   RELATIONS,
   visibleLinks,
@@ -22,6 +24,7 @@ const ROWS_PER_RELATION = 8;
 const DIRECTION_HEADING = {
   out: { title: "Out", hint: "this node points to them" },
   in: { title: "In", hint: "they point to this node" },
+  mutual: { title: "Mutual", hint: "similar or co-authored, no direction" },
 } as const;
 
 export interface NodePanelProps {
@@ -93,7 +96,7 @@ export function NodePanel({
           tabIndex={-1}
           className="break-words"
         >
-          {node.label}
+          <MathText text={node.label} />
         </Typography>
         <p className="m-0 font-mono text-[12px] text-ink-3">
           {isPaper ? `${node.data.year} · ` : ""}
@@ -109,7 +112,7 @@ export function NodePanel({
         ) : null}
       </div>
 
-      {(["out", "in"] as const).map((dir) =>
+      {(["out", "in", "mutual"] as const).map((dir) =>
         mode === "all" || mode === dir ? (
           <DirectionList
             key={`${focusId}:${dir}`}
@@ -134,7 +137,7 @@ function DirectionList({
   onHover,
   onWalk,
 }: {
-  dir: "out" | "in";
+  dir: LinkDirection;
   links: GraphLink[];
   nodeById: ReadonlyMap<string, GraphNode>;
   onFocus(id: string): void;

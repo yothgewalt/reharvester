@@ -1,6 +1,8 @@
 import type {
-  AskRequest,
-  AskResponse,
+  ActivationStatus,
+  ChatDone,
+  ChatRequest,
+  ChatSourcesMeta,
   Community,
   CommunityLink,
   CrawlStreamEvent,
@@ -20,10 +22,10 @@ import type {
   WsStatus,
 } from "@/types/domain";
 
-export interface AskStreamHandlers {
-  onSources(meta: Omit<AskResponse, "answer">): void;
+export interface ChatStreamHandlers {
+  onSources(meta: ChatSourcesMeta): void;
   onToken(text: string): void;
-  onDone(answer: string, generated: boolean): void;
+  onDone(done: ChatDone): void;
   onError(message: string): void;
 }
 
@@ -68,17 +70,20 @@ export interface ApiTransport {
   listGapPairs(): Promise<GapReport>;
   listCommunities(): Promise<Community[]>;
   listCommunityLinks(): Promise<CommunityLink[]>;
-  ask(req: AskRequest): Promise<AskResponse>;
   /**
-   * Streams an answer: sources land in milliseconds, prose arrives token by
-   * token over the seconds that follow. Never rejects for a generation
-   * failure — that is reported through `onError` so the sources already on
-   * screen survive. Returns when the stream closes.
+   * Streams a chat turn: sources land in milliseconds, prose arrives token by
+   * token over the seconds that follow. Rejects with ApiError for a 400
+   * (bad request) or 409 (no active project) that arrives before the stream
+   * starts; a failure mid-stream instead reaches `handlers.onError` so
+   * whatever already rendered survives. Returns when the stream closes.
    */
-  askStream(req: AskRequest, handlers: AskStreamHandlers, signal?: AbortSignal): Promise<void>;
+  chatStream(req: ChatRequest, handlers: ChatStreamHandlers, signal?: AbortSignal): Promise<void>;
   /** Model-written keywords for `field`; an empty list means no model answered. */
   randomKeywords(field: string): Promise<string[]>;
   listProjects(): Promise<ProjectSummary[]>;
+  /** Makes a project the active corpus. Rejects with ApiError 400/404/409 for a bad, unknown or empty project. */
+  activateProject(id: string): Promise<ActivationStatus>;
+  getActivation(id: string): Promise<ActivationStatus>;
   listJobs(): Promise<SchedulerProfile[]>;
   getSettings(): Promise<SettingsView>;
   /** Send exactly one changed field; the server rejects the whole patch on any invalid one. */

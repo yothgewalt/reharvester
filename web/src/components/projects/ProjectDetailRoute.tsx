@@ -1,9 +1,16 @@
 "use client";
 import { useSearchParams } from "next/navigation";
 
-import { ProjectDetail } from "./ProjectDetail";
+import { isProjectTab, ProjectDetail } from "./ProjectDetail";
 
 export function ProjectDetailRoute() {
-  const id = useSearchParams().get("id") ?? "";
-  return <ProjectDetail id={id} />;
+  const params = useSearchParams();
+  const tab = params.get("tab");
+  return (
+    <ProjectDetail
+      id={params.get("id") ?? ""}
+      initialTab={tab && isProjectTab(tab) ? tab : undefined}
+      pinDocId={params.get("pin") ?? undefined}
+    />
+  );
 }
